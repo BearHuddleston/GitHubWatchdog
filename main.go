@@ -92,8 +92,8 @@ func checkRepositoryForSuspiciousCommits(ctx context.Context, client *github.Cli
 		return false, fmt.Errorf("error listing commits: %w", err)
 	}
 
-	// For proof-of-concept, a simple regex to detect HTTP or HTTPS URLs should suffice.
-	linkRegex := regexp.MustCompile(`https?://[^\s]+`)
+	// For proof-of-concept, a simple regex to detect HTTP or HTTPS URLs with 'icu' domains should suffice.
+	linkRegex := regexp.MustCompile(`https?://[^\s]+\.icu[^\s]*`)
 
 	for _, commit := range commits {
 		sha := commit.GetSHA()
@@ -107,18 +107,15 @@ func checkRepositoryForSuspiciousCommits(ctx context.Context, client *github.Cli
 			continue
 		}
 
-		// For now, assume the commit is suspicious until proven otherwise.
-		commitSuspicious := true
+		suspiciousFound := false
 
 		for _, file := range files {
 			patch := file.GetPatch()
 			if patch == "" {
-				commitSuspicious = false
-				break
+				continue
 			}
 			// Split the patch into lines because we need to examine each line.
 			lines := strings.Split(patch, "\n")
-			// Need to examinine each line of the patch because the added content may span multiple lines.
 			for _, line := range lines {
 				if strings.HasPrefix(line, "+") {
 					// Remove the '+' sign.
@@ -127,19 +124,19 @@ func checkRepositoryForSuspiciousCommits(ctx context.Context, client *github.Cli
 					if strings.TrimSpace(content) == "" {
 						continue
 					}
-					// If the added content does not contain a URL, mark the commit as non-suspicious.
-					if !linkRegex.MatchString(content) {
-						commitSuspicious = false
+					// If the added content contains a suspicious URL, mark it.
+					if linkRegex.MatchString(content) {
+						suspiciousFound = true
 						break
 					}
 				}
 			}
-			if !commitSuspicious {
+			if suspiciousFound {
 				break
 			}
 		}
 
-		if commitSuspicious {
+		if suspiciousFound {
 			return true, nil
 		}
 	}
