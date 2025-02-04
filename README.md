@@ -2,6 +2,17 @@
 
 This project is a Go-based tool that leverages the GitHub API to search for repositories and analyze their owners for suspicious activity. It specifically targets users with newly created accounts or those with repositories that match certain "empty" criteria. The tool gathers information such as repository stars, repository size, and user contributions, then flags users based on predefined criteria.
 
+## Barked at
+
+-   [Belopolskayad](https://github.com/Belopolskayad)
+-   [DmytroShybaiev](https://github.com/DmytroShybaiev)
+-   [DanyaYoung](https://github.com/DanyaYoung)
+-   [KlymenkoT](https://github.com/KlymenkoT)
+-   [xeroxic](https://github.com/xeroxic)
+-   [antontrey](https://github.com/antontrey)
+
+**Last Updated:** 2025-02-04 8:10AM CST
+
 ## Overview
 
 The tool performs the following tasks:
