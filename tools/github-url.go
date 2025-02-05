@@ -29,7 +29,7 @@ func ProcessSuspiciousUsers(inputPath, outputPath string) error {
 		if line == "" {
 			continue
 		}
-		fullURL := "[" + line + "](https://github.com/" + line + ")"
+		fullURL := "1. [" + line + "](https://github.com/" + line + ")"
 		_, err := writer.WriteString(fullURL + "\n")
 		if err != nil {
 			return fmt.Errorf("failed to write to output file: %w", err)
