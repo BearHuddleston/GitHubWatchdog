@@ -10,6 +10,18 @@ import (
 	"github.com/google/go-github/v68/github"
 )
 
+// Heuristic constants.
+const (
+	minTotalStarsForOriginal      = 10
+	minEmptyCountForOriginal      = 20
+	minSuspiciousReposCountForNew = 5
+	maxContributionsForNew        = 5
+	minTotalStarsForRecent        = 10
+	maxAccountAgeForRecent        = 3 * 24 * time.Hour // 3 days
+)
+
+var scannedUsers = make(map[string]bool)
+
 // getContributionsLastYear returns an approximate count of the user's public events
 // (used as a proxy for contributions) in the last year.
 func getContributionsLastYear(ctx context.Context, client *github.Client, username string) int {
@@ -43,12 +55,18 @@ func getContributionsLastYear(ctx context.Context, client *github.Client, userna
 	return count
 }
 
-// analyzeUser fetches the user profile and repositories, then returns true if the
-// account (which must be new—created within the last 7 days) meets any of the following:
-//   - Original criteria: totalStars >= 10 and emptyCount >= 20,
-//   - New criteria: at least 5 empty repos with >= 5 stars each and contributions <= 5,
-//   - Additional criteria: account is less than 24 hours old and totalStars >= 10.
+// analyzeUser retrieves the user's profile and repositories, and then
+// returns true if any of the following suspicious conditions are met:
+//   - suspiciousOriginal: Indicates original content exhibiting unusual patterns.
+//   - suspiciousNew: Flags new or emerging patterns that require attention.
+//   - suspiciousRecent: Marks recent activities as potentially suspicious.
 func analyzeUser(ctx context.Context, client *github.Client, username string) bool {
+	// Check if the user was already scanned.
+	if scannedUsers[username] {
+		log.Printf("User %s has already been scanned.", username)
+		return false
+	}
+
 	user, _, err := client.Users.Get(ctx, username)
 	if err != nil {
 		log.Printf("Error fetching user %s: %v", username, err)
@@ -81,6 +99,8 @@ func analyzeUser(ctx context.Context, client *github.Client, username string) bo
 	}
 	if len(allRepos) == 0 {
 		log.Printf("User %s has no repositories.", username)
+		// Mark user as scanned even if no repositories found.
+		scannedUsers[username] = true
 		return false
 	}
 
@@ -107,12 +127,12 @@ func analyzeUser(ctx context.Context, client *github.Client, username string) bo
 	log.Printf("User %s details: account age %v, totalStars %d, emptyCount %d, suspiciousEmptyRepos %d, contributions in last year %d",
 		username, accountAge, totalStars, emptyCount, suspiciousReposCount, contributions)
 
-	// Original criteria: totalStars >= 10 and emptyCount >= 20.
-	suspiciousOriginal := (totalStars >= 10 && emptyCount >= 20)
-	// New criteria: at least 5 empty repos with >= 5 stars each and contributions <= 5.
-	suspiciousNew := (suspiciousReposCount >= 5 && contributions <= 5)
-	// Additional criteria: account is less than 24 hours old and has at least 10 stars.
-	suspiciousRecent := (accountAge < 24*time.Hour && totalStars >= 10)
+	suspiciousOriginal := (totalStars >= minTotalStarsForOriginal && emptyCount >= minEmptyCountForOriginal)
+	suspiciousNew := (suspiciousReposCount >= minSuspiciousReposCountForNew && contributions <= maxContributionsForNew)
+	suspiciousRecent := (accountAge < maxAccountAgeForRecent && totalStars >= minTotalStarsForRecent)
+
+	// Mark user as scanned.
+	scannedUsers[username] = true
 
 	if suspiciousOriginal || suspiciousNew || suspiciousRecent {
 		log.Printf("User %s is flagged as suspicious (suspiciousOriginal=%v, suspiciousNew=%v, suspiciousRecent=%v).", username, suspiciousOriginal, suspiciousNew, suspiciousRecent)
