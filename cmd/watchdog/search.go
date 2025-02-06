@@ -73,6 +73,11 @@ func processRepository(ctx context.Context, client *github.Client, repo *github.
 		}
 	}
 
+	// Analyze repository README for malware indicators.
+	if err := analyzeRepo(ctx, client, owner, repoName); err != nil {
+		log.Printf("Error analyzing repository %s for malware: %v", repoID, err)
+	}
+
 	if err := appendProcessedRepo(recordFile, repoID); err != nil {
 		log.Printf("Error recording repository %s as processed: %v", repoID, err)
 	} else {

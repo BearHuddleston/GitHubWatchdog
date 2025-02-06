@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -180,4 +182,72 @@ func appendSuspiciousUser(filename, username string) error {
 		return err
 	}
 	return nil
+}
+
+// analyzeRepo checks if the repository's README contains the malware indicators,
+// and if so, categorizes the repo as malware and records its stargazers as Malicious Stargazers.
+func analyzeRepo(ctx context.Context, client *github.Client, owner, repoName string) error {
+	readme, _, err := client.Repositories.GetReadme(ctx, owner, repoName, nil)
+	if err != nil {
+		return fmt.Errorf("error fetching README for %s/%s: %w", owner, repoName, err)
+	}
+
+	// Decode the README content.
+	content, err := readme.GetContent()
+	if err != nil {
+		return fmt.Errorf("error decoding README content for %s/%s: %w", owner, repoName, err)
+	}
+
+	// Check for malware indicators in the README.
+	if strings.Contains(content, "# [DOWNLOAD LINK]") && strings.Contains(content, "# PASSWORD : 2025") {
+		log.Printf("Repository %s/%s is categorized as malware.", owner, repoName)
+		// Append the malware repo to a file.
+		repoID := fmt.Sprintf("%s/%s", owner, repoName)
+		if err := appendMaliciousRepo("malicious_repos.txt", repoID); err != nil {
+			log.Printf("Error recording malware repository %s: %v", repoID, err)
+		}
+
+		opts := &github.ListOptions{PerPage: 100}
+		for {
+			stargazers, resp, err := client.Activity.ListStargazers(ctx, owner, repoName, opts)
+			if err != nil {
+				log.Printf("Error fetching stargazers for repo %s/%s: %v", owner, repoName, err)
+				break
+			}
+			for _, user := range stargazers {
+				if err := appendMaliciousStargazer("malicious_stargazers.txt", user.User.GetLogin()); err != nil {
+					log.Printf("Error recording malicious stargazer %s: %v", user.User.GetLogin(), err)
+				}
+			}
+			if resp.NextPage == 0 {
+				break
+			}
+			opts.Page = resp.NextPage
+		}
+	}
+	return nil
+}
+
+// writeLineToFile is a helper function that appends a line to the specified file.
+func writeLineToFile(filename, line string) error {
+	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(line + "\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// appendMaliciousRepo appends a malicious repository ID (owner/repo) to the given file.
+func appendMaliciousRepo(filename, repoID string) error {
+	return writeLineToFile(filename, repoID)
+}
+
+// appendMaliciousStargazer appends a malicious stargazer's username to the given file.
+func appendMaliciousStargazer(filename, username string) error {
+	return writeLineToFile(filename, username)
 }
