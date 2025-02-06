@@ -7,6 +7,12 @@ import (
 	"strings"
 )
 
+// Should turn this into arguments
+const (
+	inputPath  = "malicious_stargazers.txt"
+	outputPath = "./bark/malicious_stargazers/README.md"
+)
+
 func ProcessSuspiciousUsers(inputPath, outputPath string) error {
 	inputFile, err := os.Open(inputPath)
 	if err != nil {
@@ -44,8 +50,6 @@ func ProcessSuspiciousUsers(inputPath, outputPath string) error {
 
 // Example usage
 func main() {
-	inputPath := "suspicious_users.txt"
-	outputPath := "./bark/README.md"
 	if err := ProcessSuspiciousUsers(inputPath, outputPath); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
