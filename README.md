@@ -6,7 +6,7 @@ This project is a Go-based tool that leverages the GitHub API to search for repo
 
 [bark/README.md](bark/README.md)
 
-**Last Updated:** 2025-02-05 07:10AM CST
+**Last Updated:** 2025-02-05 07:26PM CST
 
 ## Overview
 
@@ -31,9 +31,9 @@ The tool performs the following tasks:
 
     The user is flagged as suspicious if they meet any of these criteria:
 
-    -   **Original Criteria:** Total stars ≥ 10 and number of empty repositories ≥ 20.
-    -   **New Criteria:** At least 5 empty repositories with ≥ 5 stars each and ≤ 5 contributions in the last year.
-    -   **Additional Criteria:** Account is less than 24 hours old and has at least 10 stars.
+    -   **suspiciousOriginal:** Indicates original content exhibiting unusual patterns.
+    -   **suspiciousNew:** Flags new or emerging patterns that require attention.
+    -   **suspiciousRecent:** Marks recent activities as potentially suspicious.
 
 -   **Suspicious User Recording:**  
     If a user is flagged as suspicious, their username is appended to a file (`suspicious_users.txt`).
