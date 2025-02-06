@@ -1,3 +1,7 @@
+1. [sofia111222321](https://github.com/sofia111222321)
+1. [vladsuk1](https://github.com/vladsuk1)
+1. [alena33992](https://github.com/alena33992)
+1. [yulmier12rill](https://github.com/yulmier12rill)
 1. [dunespace](https://github.com/dunespace)
 1. [t1mkagaevoy](https://github.com/t1mkagaevoy)
 1. [airdropinsiders](https://github.com/airdropinsiders)
