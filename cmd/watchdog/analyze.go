@@ -12,7 +12,6 @@ import (
 	"github.com/google/go-github/v68/github"
 )
 
-// Heuristic constants.
 const (
 	minTotalStarsForOriginal      = 10
 	minEmptyCountForOriginal      = 20
@@ -22,11 +21,17 @@ const (
 	maxAccountAgeForRecent        = 3 * 24 * time.Hour // 3 days
 )
 
-var scannedUsers = make(map[string]bool)
+type Analyzer struct {
+	processedUsers map[string]bool
+}
 
-// getContributionsLastYear returns an approximate count of the user's public events
-// (used as a proxy for contributions) in the last year.
-func getContributionsLastYear(ctx context.Context, client *github.Client, username string) int {
+func NewAnalyzer() *Analyzer {
+	return &Analyzer{
+		processedUsers: make(map[string]bool),
+	}
+}
+
+func (a *Analyzer) contributionsLastYear(ctx context.Context, client *github.Client, username string) int {
 	perPage := 100
 	opts := &github.ListOptions{PerPage: perPage}
 	count := 0
@@ -40,12 +45,11 @@ func getContributionsLastYear(ctx context.Context, client *github.Client, userna
 		if len(events) == 0 {
 			break
 		}
-		// The events are in reverse chronological order.
 		for _, event := range events {
 			if event.CreatedAt != nil && event.CreatedAt.Time.After(oneYearAgo) {
 				count++
 			} else {
-				// Once we see an event older than one year, we can stop counting.
+				// We can exit once an event is older than a year.
 				return count
 			}
 		}
@@ -57,14 +61,10 @@ func getContributionsLastYear(ctx context.Context, client *github.Client, userna
 	return count
 }
 
-// analyzeUser retrieves the user's profile and repositories, and then
-// returns true if any of the following suspicious conditions are met:
-//   - suspiciousOriginal: Indicates original content exhibiting unusual patterns.
-//   - suspiciousNew: Flags new or emerging patterns that require attention.
-//   - suspiciousRecent: Marks recent activities as potentially suspicious.
-func analyzeUser(ctx context.Context, client *github.Client, username string) bool {
-	// Check if the user was already scanned.
-	if scannedUsers[username] {
+// analyzeUser retrieves the user's profile and repositories,
+// and flags the user as suspicious if any set of heuristics is met.
+func (a *Analyzer) analyzeUser(ctx context.Context, client *github.Client, username string) bool {
+	if a.processedUsers[username] {
 		log.Printf("User %s has already been scanned.", username)
 		return false
 	}
@@ -79,76 +79,68 @@ func analyzeUser(ctx context.Context, client *github.Client, username string) bo
 	}
 	accountAge := time.Since(user.GetCreatedAt().Time)
 
-	// List all repositories owned by the user.
+	// List repositories owned by the user.
 	opts := &github.RepositoryListOptions{
 		Type: "owner",
 		ListOptions: github.ListOptions{
 			PerPage: 100,
 		},
 	}
-	var allRepos []*github.Repository
+	var repos []*github.Repository
 	for {
-		repos, resp, err := client.Repositories.List(ctx, username, opts)
+		r, resp, err := client.Repositories.List(ctx, username, opts)
 		if err != nil {
 			log.Printf("Error listing repos for user %s: %v", username, err)
 			break
 		}
-		allRepos = append(allRepos, repos...)
+		repos = append(repos, r...)
 		if resp.NextPage == 0 {
 			break
 		}
 		opts.Page = resp.NextPage
 	}
-	if len(allRepos) == 0 {
+
+	if len(repos) == 0 {
 		log.Printf("User %s has no repositories.", username)
-		// Mark user as scanned even if no repositories found.
-		scannedUsers[username] = true
+		a.processedUsers[username] = true
 		return false
 	}
 
-	totalStars := 0
-	emptyCount := 0
-	suspiciousReposCount := 0 // Count of repos that are "empty" and have >= 5 stars.
-	// Use a threshold for emptiness; sometimes a repo isn't exactly size 0 but is effectively empty.
-	const emptyThreshold = 10 // Adjust this threshold as needed.
-	for _, repo := range allRepos {
+	totalStars, emptyCount, suspiciousEmptyCount := 0, 0, 0
+	const emptyThreshold = 10
+	for _, repo := range repos {
 		stars := repo.GetStargazersCount()
 		totalStars += stars
-		// Consider a repository "empty" if its size is below the threshold.
 		if repo.GetSize() < emptyThreshold {
 			emptyCount++
 			if stars >= 5 {
-				suspiciousReposCount++
+				suspiciousEmptyCount++
 			}
 		}
 	}
 
-	contributions := getContributionsLastYear(ctx, client, username)
+	contributions := a.contributionsLastYear(ctx, client, username)
 
-	// Debug logging for intermediate values.
-	log.Printf("User %s details: account age %v, totalStars %d, emptyCount %d, suspiciousEmptyRepos %d, contributions in last year %d",
-		username, accountAge, totalStars, emptyCount, suspiciousReposCount, contributions)
+	log.Printf("User %s details: age %v, totalStars %d, emptyCount %d, suspiciousEmptyRepos %d, contributions %d",
+		username, accountAge, totalStars, emptyCount, suspiciousEmptyCount, contributions)
 
-	suspiciousOriginal := (totalStars >= minTotalStarsForOriginal && emptyCount >= minEmptyCountForOriginal)
-	suspiciousNew := (suspiciousReposCount >= minSuspiciousReposCountForNew && contributions <= maxContributionsForNew)
-	suspiciousRecent := (accountAge < maxAccountAgeForRecent && totalStars >= minTotalStarsForRecent)
+	flagOriginal := totalStars >= minTotalStarsForOriginal && emptyCount >= minEmptyCountForOriginal
+	flagNew := suspiciousEmptyCount >= minSuspiciousReposCountForNew && contributions <= maxContributionsForNew
+	flagRecent := accountAge < maxAccountAgeForRecent && totalStars >= minTotalStarsForRecent
 
-	// Mark user as scanned.
-	scannedUsers[username] = true
+	a.processedUsers[username] = true
 
-	if suspiciousOriginal || suspiciousNew || suspiciousRecent {
-		log.Printf("User %s is flagged as suspicious (suspiciousOriginal=%v, suspiciousNew=%v, suspiciousRecent=%v).", username, suspiciousOriginal, suspiciousNew, suspiciousRecent)
+	if flagOriginal || flagNew || flagRecent {
+		log.Printf("User %s flagged (original=%v, new=%v, recent=%v)", username, flagOriginal, flagNew, flagRecent)
 		return true
 	}
-
 	return false
 }
 
-// loadProcessedRepos reads a file of processed repository IDs and returns a map.
+// loadProcessedRepos reads a file and returns a set of processed repository IDs.
 func loadProcessedRepos(filename string) (map[string]bool, error) {
 	file, err := os.Open(filename)
 	if err != nil {
-		// If the file does not exist, return an empty map.
 		if os.IsNotExist(err) {
 			return make(map[string]bool), nil
 		}
@@ -159,7 +151,7 @@ func loadProcessedRepos(filename string) (map[string]bool, error) {
 	processed := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
 		if line != "" {
 			processed[line] = true
 		}
@@ -170,53 +162,59 @@ func loadProcessedRepos(filename string) (map[string]bool, error) {
 	return processed, nil
 }
 
-// appendSuspiciousUser appends a suspicious username to a record file.
-func appendSuspiciousUser(filename, username string) error {
+// writeLineToFile appends a line to the given file.
+func writeLineToFile(filename, line string) error {
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-
-	if _, err := file.WriteString(username + "\n"); err != nil {
-		return err
-	}
-	return nil
+	_, err = file.WriteString(line + "\n")
+	return err
 }
 
-// analyzeRepo checks if the repository's README contains the malware indicators,
-// and if so, categorizes the repo as malware and records its stargazers as Malicious Stargazers.
-func analyzeRepo(ctx context.Context, client *github.Client, owner, repoName string) error {
+func appendSuspiciousUser(filename, username string) error {
+	return writeLineToFile(filename, username)
+}
+
+func appendMaliciousRepo(filename, repoID string) error {
+	return writeLineToFile(filename, repoID)
+}
+
+func appendMaliciousStargazer(filename, username string) error {
+	return writeLineToFile(filename, username)
+}
+
+// analyzeRepo checks the repository README for malware indicators.
+// If found, it categorizes the repo as malicious and records its stargazers.
+func analyzeRepo(ctx context.Context, client *github.Client, owner, repoName, malRepoFile, malStargazerFile string) error {
 	readme, _, err := client.Repositories.GetReadme(ctx, owner, repoName, nil)
 	if err != nil {
-		return fmt.Errorf("error fetching README for %s/%s: %w", owner, repoName, err)
+		return fmt.Errorf("fetching README for %s/%s: %w", owner, repoName, err)
 	}
 
-	// Decode the README content.
 	content, err := readme.GetContent()
 	if err != nil {
-		return fmt.Errorf("error decoding README content for %s/%s: %w", owner, repoName, err)
+		return fmt.Errorf("decoding README for %s/%s: %w", owner, repoName, err)
 	}
 
-	// Check for malware indicators in the README.
 	if strings.Contains(content, "# [DOWNLOAD LINK]") && strings.Contains(content, "# PASSWORD : 2025") {
-		log.Printf("Repository %s/%s is categorized as malware.", owner, repoName)
-		// Append the malware repo to a file.
+		log.Printf("Repository %s/%s categorized as malware.", owner, repoName)
 		repoID := fmt.Sprintf("%s/%s", owner, repoName)
-		if err := appendMaliciousRepo("malicious_repos.txt", repoID); err != nil {
-			log.Printf("Error recording malware repository %s: %v", repoID, err)
+		if err := appendMaliciousRepo(malRepoFile, repoID); err != nil {
+			log.Printf("Recording malware repo %s: %v", repoID, err)
 		}
-
 		opts := &github.ListOptions{PerPage: 100}
 		for {
 			stargazers, resp, err := client.Activity.ListStargazers(ctx, owner, repoName, opts)
 			if err != nil {
-				log.Printf("Error fetching stargazers for repo %s/%s: %v", owner, repoName, err)
+				log.Printf("Fetching stargazers for %s/%s: %v", owner, repoName, err)
 				break
 			}
 			for _, user := range stargazers {
-				if err := appendMaliciousStargazer("malicious_stargazers.txt", user.User.GetLogin()); err != nil {
-					log.Printf("Error recording malicious stargazer %s: %v", user.User.GetLogin(), err)
+				login := user.User.GetLogin()
+				if err := appendMaliciousStargazer(malStargazerFile, login); err != nil {
+					log.Printf("Recording malicious stargazer %s: %v", login, err)
 				}
 			}
 			if resp.NextPage == 0 {
@@ -226,28 +224,4 @@ func analyzeRepo(ctx context.Context, client *github.Client, owner, repoName str
 		}
 	}
 	return nil
-}
-
-// writeLineToFile is a helper function that appends a line to the specified file.
-func writeLineToFile(filename, line string) error {
-	file, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if _, err := file.WriteString(line + "\n"); err != nil {
-		return err
-	}
-	return nil
-}
-
-// appendMaliciousRepo appends a malicious repository ID (owner/repo) to the given file.
-func appendMaliciousRepo(filename, repoID string) error {
-	return writeLineToFile(filename, repoID)
-}
-
-// appendMaliciousStargazer appends a malicious stargazer's username to the given file.
-func appendMaliciousStargazer(filename, username string) error {
-	return writeLineToFile(filename, username)
 }
