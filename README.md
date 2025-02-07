@@ -55,38 +55,6 @@ The tool uses the following Go packages:
 
 These can be installed via `go get` or managed using Go modules.
 
-## Code Structure
-
-### GitHub Client Initialization
-
--   **Function:** `initializeGitHubClient(token string) *github.Client`  
-    Sets up an OAuth2-enabled GitHub client.
-
-### Contribution Count
-
--   **Function:** `getContributionsLastYear(ctx, client, username)`  
-    Counts a user's public events in the last year.
-
-### User Analysis
-
--   **Function:** `analyzeUser(ctx, client, username)`  
-    Fetches the user profile and repositories, calculates metrics, and determines if the user is suspicious.
-
-### Processed Repositories Management
-
--   **Functions:**
-    -   `loadProcessedRepos(filename string) (map[string]bool, error)`
-    -   `appendProcessedRepo(filename, repoID string) error`
-
-### Suspicious User Recording
-
--   **Function:** `appendSuspiciousUser(filename, username string) error`
-
-### Main Routine
-
--   **Function:** `main()`  
-    Orchestrates the repository search, user analysis, and file recording.
-
 ## TO-DO List
 
 ### Unit Testing
