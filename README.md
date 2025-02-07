@@ -4,9 +4,7 @@ This project is a Go-based tool that leverages the GitHub API to search for repo
 
 ## Watchdogs Barking: Calling Out Suspicious Users!
 
-[bark/README.md](bark/README.md)
-
-**Last Updated:** 2025-02-05 08:20AM CST
+[bark-2025-02-06-2058CT](bark-2025-02-06-2058CT)
 
 ## Overview
 
@@ -114,10 +112,6 @@ Consider integrating a more robust logging framework that supports log levels an
 ### Rate Limiting Handling
 
 Implement better handling for GitHub API rate limits, including automatic retries and exponential backoff.
-
-### Code Refactoring
-
-Modularize the code into multiple packages (e.g., `githubclient`, `analyzer`, `filehandler`) for better maintainability.
 
 ### Enhanced Query Parameters
 
