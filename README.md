@@ -2,6 +2,8 @@
 
 GitHubWatchdog is a Go-based microservice that leverages the GitHub API to search for repositories and analyze their owners for suspicious activity. The tool scans repositories using a predefined search query and applies heuristics to flag users who may exhibit unusual patterns, such as newly created accounts or repositories with low disk usage yet high star counts.
 
+I have personally reported **over 3000+ accounts** using this tool.
+
 ## Update
 
 The project has been restructured into a microservice architecture with a web UI (coming soon) and follows modern Go idioms. Core functionalities have been split into clear, focused packages under the `internal/` directory. The main executable is now located in the `cmd/app/` folder.
