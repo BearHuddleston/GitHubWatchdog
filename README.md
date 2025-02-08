@@ -71,12 +71,12 @@ GitHubWatchdog performs the following tasks:
 
     Dependencies are managed via Go modules. Use `go mod tidy` to ensure all dependencies are fetched.
 
-## Running the Microservice
+## Running the Application (Full Feature Microservice Soon!)
 
-Build and run the service from the project root:
+Build and run the application from the project root:
 
 ```bash
-go build -o githubwatchdog ./cmd/app
+go build -o githubwatchdog ./cmd/watchdog
 ./githubwatchdog
 ```
 
