@@ -29,7 +29,8 @@ func NewState(initial map[string]bool) *State {
 
 // worker processes repository jobs.
 func worker(ctx context.Context, client *githubv4.Client, jobs <-chan *repo.Repo, state *State, anlz *analyzer.Analyzer,
-	recordFile, suspiciousUserRecordFile, malRepoFile, malStargazerFile string, wg *sync.WaitGroup) {
+	recordFile, suspiciousUserRecordFile, malRepoFile, malStargazerFile string,
+	suspiciousUserCache *sync.Map, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for r := range jobs {
 		repoID := fmt.Sprintf("%s/%s", r.Owner, r.Name)
@@ -41,16 +42,21 @@ func worker(ctx context.Context, client *githubv4.Client, jobs <-chan *repo.Repo
 		if r.DiskUsage < 10 {
 			log.Printf("Repository %s is small; checking user...", repoID)
 			if anlz.AnalyzeUser(ctx, client, r.Owner) {
-				log.Printf("Suspicious user detected: %s", r.Owner)
-				if err := fileutil.AppendSuspiciousUser(suspiciousUserRecordFile, r.Owner); err != nil {
-					log.Printf("Recording suspicious user %s: %v", r.Owner, err)
+				// Check in shared cache before writing to file.
+				if _, exists := suspiciousUserCache.Load(r.Owner); !exists {
+					if err := fileutil.AppendSuspiciousUser(suspiciousUserRecordFile, r.Owner); err != nil {
+						log.Printf("Recording suspicious user %s: %v", r.Owner, err)
+					} else {
+						suspiciousUserCache.Store(r.Owner, true)
+					}
+					log.Printf("Suspicious user detected: %s", r.Owner)
 				}
 			}
 		}
 
 		if r.DiskUsage > 0 {
 			if err := repo.AnalyzeRepo(ctx, client, r.Owner, r.Name, malRepoFile, malStargazerFile); err != nil {
-				log.Printf("Analyzing repository %s: %v", repoID, err)
+				log.Printf("Error analyzing repo %s: %v", repoID, err)
 			}
 		} else {
 			log.Printf("Skipping README analysis for repository %s due to low disk usage.", repoID)
@@ -70,10 +76,13 @@ func SearchAndProcessRepositories(ctx context.Context, client *githubv4.Client, 
 	jobs := make(chan *repo.Repo)
 	var wg sync.WaitGroup
 
+	// Shared cache to avoid duplicate suspicious user records.
+	suspiciousUserCache := &sync.Map{}
+
 	for i := 0; i < cfg.NumWorkers; i++ {
 		wg.Add(1)
 		go worker(ctx, client, jobs, state, anlz,
-			cfg.RecordFile, cfg.SuspiciousUserRecordFile, cfg.MalRepoFile, cfg.MalStargazerFile, &wg)
+			cfg.RecordFile, cfg.SuspiciousUserRecordFile, cfg.MalRepoFile, cfg.MalStargazerFile, suspiciousUserCache, &wg)
 	}
 
 	var oldest time.Time
