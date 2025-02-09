@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -53,7 +54,7 @@ func main() {
 		oldest, err := processor.SearchAndProcessRepositories(ctx, client, currentQuery, cfg, state, anlz)
 		if err != nil {
 			// If a rate limit error is encountered (e.g. a 403), handle appropriately.
-			if err.Error() == "403" { // (or inspect the error details)
+			if strings.Contains(err.Error(), "403") {
 				logger.Error("403 Forbidden encountered due to rate limit. Ending application.")
 				os.Exit(1)
 			}
@@ -64,7 +65,6 @@ func main() {
 			logger.Info("No more repositories found, ending search.")
 			break
 		}
-
 		// Update the query to search for older repositories.
 		newQuery := fmt.Sprintf("created:<%s stars:>5", oldest.Format(time.RFC3339))
 		if newQuery == currentQuery {

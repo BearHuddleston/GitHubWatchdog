@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,42 +31,58 @@ func NewState(initial map[string]bool) *State {
 // worker processes repository jobs.
 func worker(ctx context.Context, client *githubv4.Client, jobs <-chan *repo.Repo, state *State, anlz *analyzer.Analyzer,
 	recordFile, suspiciousUserRecordFile, malRepoFile, malStargazerFile string,
-	suspiciousUserCache *sync.Map, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for r := range jobs {
-		repoID := fmt.Sprintf("%s/%s", r.Owner, r.Name)
-		if _, ok := state.processedRepos.Load(repoID); ok {
-			log.Printf("Repository %s already processed.", repoID)
-			continue
-		}
+	suspiciousUserCache *sync.Map, wg *sync.WaitGroup, errChan chan<- error) {
 
-		if r.DiskUsage < 10 {
-			log.Printf("Repository %s is small; checking user...", repoID)
-			if anlz.AnalyzeUser(ctx, client, r.Owner) {
-				// Check in shared cache before writing to file.
-				if _, exists := suspiciousUserCache.Load(r.Owner); !exists {
-					if err := fileutil.AppendSuspiciousUser(suspiciousUserRecordFile, r.Owner); err != nil {
-						log.Printf("Recording suspicious user %s: %v", r.Owner, err)
-					} else {
-						suspiciousUserCache.Store(r.Owner, true)
+	defer wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case r, ok := <-jobs:
+			if !ok {
+				return
+			}
+			repoID := fmt.Sprintf("%s/%s", r.Owner, r.Name)
+			if _, ok := state.processedRepos.Load(repoID); ok {
+				log.Printf("Repository %s already processed.", repoID)
+				continue
+			}
+
+			if r.DiskUsage < 10 {
+				log.Printf("Repository %s is small; checking user...", repoID)
+				if anlz.AnalyzeUser(ctx, client, r.Owner) {
+					if _, exists := suspiciousUserCache.Load(r.Owner); !exists {
+						if err := fileutil.AppendSuspiciousUser(suspiciousUserRecordFile, r.Owner); err != nil {
+							log.Printf("Recording suspicious user %s: %v", r.Owner, err)
+						} else {
+							suspiciousUserCache.Store(r.Owner, true)
+						}
+						log.Printf("Suspicious user detected: %s", r.Owner)
 					}
-					log.Printf("Suspicious user detected: %s", r.Owner)
 				}
 			}
-		}
 
-		if r.DiskUsage > 0 {
-			if err := repo.AnalyzeRepo(ctx, client, r.Owner, r.Name, malRepoFile, malStargazerFile); err != nil {
-				log.Printf("Error analyzing repo %s: %v", repoID, err)
+			if r.DiskUsage > 0 {
+				if err := repo.AnalyzeRepo(ctx, client, r.Owner, r.Name, malRepoFile, malStargazerFile); err != nil {
+					if strings.Contains(err.Error(), "403") {
+						// Propagate fatal 403 errors by cancelling.
+						select {
+						case errChan <- err:
+						default:
+						}
+						return
+					}
+					log.Printf("Error analyzing repo %s: %v", repoID, err)
+				}
+			} else {
+				log.Printf("Skipping README analysis for repository %s due to low disk usage.", repoID)
 			}
-		} else {
-			log.Printf("Skipping README analysis for repository %s due to low disk usage.", repoID)
-		}
 
-		if err := fileutil.AppendProcessedRepo(recordFile, repoID); err != nil {
-			log.Printf("Recording processed repository %s: %v", repoID, err)
+			if err := fileutil.AppendProcessedRepo(recordFile, repoID); err != nil {
+				log.Printf("Recording processed repository %s: %v", repoID, err)
+			}
+			state.processedRepos.Store(repoID, true)
 		}
-		state.processedRepos.Store(repoID, true)
 	}
 }
 
@@ -73,16 +90,20 @@ func worker(ctx context.Context, client *githubv4.Client, jobs <-chan *repo.Repo
 func SearchAndProcessRepositories(ctx context.Context, client *githubv4.Client, queryStr string,
 	cfg *config.Config, state *State, anlz *analyzer.Analyzer) (time.Time, error) {
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	jobs := make(chan *repo.Repo)
+	errChan := make(chan error, 1) // Buffered channel to avoid blocking.
 	var wg sync.WaitGroup
 
-	// Shared cache to avoid duplicate suspicious user records.
 	suspiciousUserCache := &sync.Map{}
 
 	for i := 0; i < cfg.NumWorkers; i++ {
 		wg.Add(1)
 		go worker(ctx, client, jobs, state, anlz,
-			cfg.RecordFile, cfg.SuspiciousUserRecordFile, cfg.MalRepoFile, cfg.MalStargazerFile, suspiciousUserCache, &wg)
+			cfg.RecordFile, cfg.SuspiciousUserRecordFile, cfg.MalRepoFile, cfg.MalStargazerFile,
+			suspiciousUserCache, &wg, errChan)
 	}
 
 	var oldest time.Time
@@ -121,8 +142,7 @@ PAGE_LOOP:
 			"after":   cursor,
 		}
 
-		err := client.Query(ctx, &q, variables)
-		if err != nil {
+		if err := client.Query(ctx, &q, variables); err != nil {
 			close(jobs)
 			return oldest, fmt.Errorf("searching repositories on page %d: %w", page, err)
 		}
@@ -138,6 +158,7 @@ PAGE_LOOP:
 		if len(q.Search.Nodes) == 0 {
 			break
 		}
+
 		for _, node := range q.Search.Nodes {
 			r := &repo.Repo{
 				Owner:          string(node.Repository.Owner.Login),
@@ -146,7 +167,13 @@ PAGE_LOOP:
 				DiskUsage:      node.Repository.DiskUsage,
 				StargazerCount: node.Repository.StargazerCount,
 			}
-			jobs <- r
+			// Use a non-blocking send so that it can exit early when ctx is canceled.
+			select {
+			case jobs <- r:
+			case <-ctx.Done():
+				break PAGE_LOOP
+			}
+
 			if oldest.IsZero() || r.UpdatedAt.Before(oldest) {
 				oldest = r.UpdatedAt
 			}
@@ -155,8 +182,22 @@ PAGE_LOOP:
 			break PAGE_LOOP
 		}
 		cursor = &q.Search.PageInfo.EndCursor
+
+		select {
+		case err := <-errChan:
+			cancel()
+			close(jobs)
+			return oldest, err
+		default:
+		}
 	}
 	close(jobs)
 	wg.Wait()
+
+	select {
+	case err := <-errChan:
+		return oldest, err
+	default:
+	}
 	return oldest, nil
 }
