@@ -26,7 +26,7 @@ func AnalyzeRepo(ctx context.Context, client *githubv4.Client, owner, repoName, 
 	var q struct {
 		Repository struct {
 			Readme *struct {
-				Text string
+				Text string `graphql:"... on Blob"`
 			} `graphql:"readme: object(expression: \"HEAD:README.md\")"`
 		} `graphql:"repository(owner: $owner, name: $name)"`
 	}
