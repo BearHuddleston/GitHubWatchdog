@@ -4,10 +4,6 @@ GitHubWatchdog is a Go-based microservice that leverages the GitHub API to searc
 
 I have personally reported **over 3000+ accounts** using this tool.
 
-## Update
-
-The project has been restructured into a microservice architecture with a web UI (coming soon) and follows modern Go idioms. Core functionalities have been split into clear, focused packages under the `internal/` directory. The main executable is now located in the `cmd/app/` folder. A SQLite database has been introduced to track processed users and repositories efficiently.
-
 ## Architecture & Project Structure
 
 The new structure improves modularity, maintainability, and data persistence. An example directory layout is:
