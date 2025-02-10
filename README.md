@@ -6,8 +6,6 @@ I have personally reported **over 3000+ accounts** using this tool.
 
 ## Architecture & Project Structure
 
-The new structure improves modularity, maintainability, and data persistence. An example directory layout is:
-
 ```
 GitHubWatchdog/
 ├── cmd/
@@ -26,8 +24,6 @@ GitHubWatchdog/
     └── processor/
         └── processor.go      # Coordinates repository search, worker pool, and processing.
 ```
-
-This structure allows each package to have a single responsibility, keeping the codebase simple and aligned with Go best practices.
 
 ## Overview
 
