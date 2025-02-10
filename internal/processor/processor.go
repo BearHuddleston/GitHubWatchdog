@@ -124,9 +124,6 @@ func SearchAndProcessRepositories(
 								analysis.EmptyCount,
 								analysis.SuspiciousEmptyCount,
 								analysis.Contributions,
-								analysis.FlagOriginal,
-								analysis.FlagNew,
-								analysis.FlagRecent,
 								analysis.Suspicious,
 							); err != nil {
 								log.Printf("Error recording processed user %s: %v", repoItem.Owner, err)
