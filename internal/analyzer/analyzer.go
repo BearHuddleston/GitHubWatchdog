@@ -12,16 +12,6 @@ import (
 	"githubwatchdog.bearhuddleston/internal/db"
 )
 
-// Thresholds for flagging user accounts.
-const (
-	minTotalStarsForOriginal      = 10
-	minEmptyCountForOriginal      = 20
-	minSuspiciousReposCountForNew = 5
-	maxContributionsForNew        = 5
-	minTotalStarsForRecent        = 10
-	maxAccountAgeForRecent        = 10 * 24 * time.Hour // 10 days
-)
-
 // AnalysisResult holds aggregated metrics for a GitHub user.
 type AnalysisResult struct {
 	Suspicious           bool
@@ -29,9 +19,7 @@ type AnalysisResult struct {
 	EmptyCount           int
 	SuspiciousEmptyCount int
 	Contributions        int
-	FlagOriginal         bool
-	FlagNew              bool
-	FlagRecent           bool
+	HeuristicResults     []HeuristicResult
 }
 
 // Analyzer caches user analysis results to avoid duplicate processing.
@@ -88,34 +76,29 @@ func (a *Analyzer) AnalyzeUser(ctx context.Context, client *githubv4.Client, use
 		return result, nil
 	}
 
-	totalStars, emptyCount, suspiciousEmptyCount := computeRepoMetrics(data.Repositories)
-	accountAge := time.Since(data.CreatedAt)
-	log.Printf("User %s: age=%v, totalStars=%d, emptyCount=%d, suspiciousEmptyRepos=%d, contributions=%d",
-		username, accountAge, totalStars, emptyCount, suspiciousEmptyCount, data.Contributions)
+	// Run heuristics via the interface.
+	heuristicResults, overallSuspicious := EvaluateUserHeuristics(data, data.Repositories)
 
-	// Determine heuristic flags.
-	flagOriginal := totalStars >= minTotalStarsForOriginal && emptyCount >= minEmptyCountForOriginal
-	flagNew := suspiciousEmptyCount >= minSuspiciousReposCountForNew && data.Contributions <= maxContributionsForNew
-	flagRecent := accountAge < maxAccountAgeForRecent && totalStars >= minTotalStarsForRecent
-	suspicious := flagOriginal || flagNew || flagRecent
+	// Log individual heuristic results.
+	for _, hr := range heuristicResults {
+		log.Printf("Heuristic %s for user %s: Flag=%v, Description=%s", hr.Name, username, hr.Flag, hr.Description)
+	}
 
 	analysisResult := AnalysisResult{
-		Suspicious:           suspicious,
-		TotalStars:           totalStars,
-		EmptyCount:           emptyCount,
-		SuspiciousEmptyCount: suspiciousEmptyCount,
+		Suspicious:           overallSuspicious,
+		TotalStars:           func() int { ts, _, _ := computeRepoMetrics(data.Repositories); return ts }(),
+		EmptyCount:           func() int { _, ec, _ := computeRepoMetrics(data.Repositories); return ec }(),
+		SuspiciousEmptyCount: func() int { _, _, sec := computeRepoMetrics(data.Repositories); return sec }(),
 		Contributions:        data.Contributions,
-		FlagOriginal:         flagOriginal,
-		FlagNew:              flagNew,
-		FlagRecent:           flagRecent,
+		HeuristicResults:     heuristicResults,
 	}
 
 	// Cache and record the result.
 	a.userCache.Store(username, analysisResult)
 	a.processedUsers.Store(username, analysisResult)
 
-	if suspicious {
-		log.Printf("User %s flagged as suspicious (Original=%v, New=%v, Recent=%v)", username, flagOriginal, flagNew, flagRecent)
+	if overallSuspicious {
+		log.Printf("User %s flagged as suspicious via heuristics.", username)
 	}
 
 	return analysisResult, nil
