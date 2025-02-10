@@ -8,11 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"log/slog"
-
 	"githubwatchdog.bearhuddleston/internal/analyzer"
 	"githubwatchdog.bearhuddleston/internal/config"
-	"githubwatchdog.bearhuddleston/internal/fileutil"
+	"githubwatchdog.bearhuddleston/internal/db"
 	"githubwatchdog.bearhuddleston/internal/github"
 	"githubwatchdog.bearhuddleston/internal/processor"
 )
@@ -24,8 +22,21 @@ func main() {
 		log.Fatal(err)
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	logger.Info("GitHub token loaded. Starting repository search.")
+	// Initialize the database (creates file if needed).
+	database, err := db.NewDatabase("github_watchdog.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer database.Close()
+
+	// Load all processed users into memory.
+	processedUsers, err := database.GetProcessedUsers()
+	if err != nil {
+		log.Fatalf("Could not load processed users: %v", err)
+	}
+	log.Printf("Loaded %d processed users", len(processedUsers))
+
+	log.Println("GitHub token loaded. Starting repository search.")
 
 	// Create a GitHub client.
 	client := github.NewClient(cfg.Token)
@@ -34,45 +45,33 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
-	// Load previously processed repositories.
-	processedRepos, err := fileutil.LoadProcessedRepos(cfg.RecordFile)
-	if err != nil {
-		logger.Error(err.Error())
-		processedRepos = make(map[string]bool)
-	}
-
-	// Initialize application state and analyzer.
-	state := processor.NewState(processedRepos)
 	anlz := analyzer.NewAnalyzer()
 
-	// Start with the base query.
 	currentQuery := cfg.GitHubQuery
 
 	// Main processing loop.
 	for {
-		logger.Info("Searching for repositories", slog.String("query", currentQuery))
-		oldest, err := processor.SearchAndProcessRepositories(ctx, client, currentQuery, cfg, state, anlz)
+		log.Printf("Searching for repositories: query=%s", currentQuery)
+		// Pass the processedUsers map to the processing routine.
+		oldest, err := processor.SearchAndProcessRepositories(ctx, client, currentQuery, cfg, anlz, database, processedUsers)
 		if err != nil {
-			// If a rate limit error is encountered (e.g. a 403), handle appropriately.
 			if strings.Contains(err.Error(), "403") {
-				logger.Error("403 Forbidden encountered due to rate limit. Ending application.")
+				log.Println("403 Forbidden encountered due to rate limit. Ending application.")
 				os.Exit(1)
 			}
-			logger.Error(err.Error())
-			os.Exit(1)
+			log.Fatal(err)
 		}
 		if oldest.IsZero() {
-			logger.Info("No more repositories found, ending search.")
+			log.Println("No more repositories found, ending search.")
 			break
 		}
-		// Update the query to search for older repositories.
 		newQuery := fmt.Sprintf("created:<%s stars:>5", oldest.Format(time.RFC3339))
 		if newQuery == currentQuery {
 			break
 		}
 		currentQuery = newQuery
-		logger.Info("Continuing search with updated query", slog.String("query", currentQuery))
+		log.Printf("Continuing search with updated query: %s", currentQuery)
 	}
 
-	logger.Info("Search completed.")
+	log.Println("Search completed.")
 }

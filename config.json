@@ -1,11 +1,6 @@
 {
-    "record_file": "processed_repos.txt",
-    "suspicious_user_record_file": "suspicious_users.txt",
-    "mal_repo_file": "malicious_repos.txt",
-    "mal_stargazer_file": "malicious_stargazers.txt",
     "max_pages": 10,
     "per_page": 100,
-    "github_query": "created:>2025-02-8 stars:>5",
-    "token": "",
-    "num_workers": 5
+    "github_query": "created:>2025-02-07 stars:>5",
+    "token": ""
 }

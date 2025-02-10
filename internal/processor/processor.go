@@ -9,107 +9,29 @@ import (
 	"time"
 
 	"github.com/shurcooL/githubv4"
+	"golang.org/x/sync/errgroup"
+
 	"githubwatchdog.bearhuddleston/internal/analyzer"
 	"githubwatchdog.bearhuddleston/internal/config"
-	"githubwatchdog.bearhuddleston/internal/fileutil"
-	"githubwatchdog.bearhuddleston/internal/repo"
+	"githubwatchdog.bearhuddleston/internal/db"
 )
 
-// State holds a map of processed repository IDs.
-type State struct {
-	processedRepos sync.Map // key: repoID, value: bool
-}
-
-func NewState(initial map[string]bool) *State {
-	s := &State{}
-	for k, v := range initial {
-		s.processedRepos.Store(k, v)
-	}
-	return s
-}
-
-// worker processes repository jobs.
-func worker(ctx context.Context, client *githubv4.Client, jobs <-chan *repo.Repo, state *State, anlz *analyzer.Analyzer,
-	recordFile, suspiciousUserRecordFile, malRepoFile, malStargazerFile string,
-	suspiciousUserCache *sync.Map, wg *sync.WaitGroup, errChan chan<- error) {
-
-	defer wg.Done()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case r, ok := <-jobs:
-			if !ok {
-				return
-			}
-			repoID := fmt.Sprintf("%s/%s", r.Owner, r.Name)
-			if _, ok := state.processedRepos.Load(repoID); ok {
-				log.Printf("Repository %s already processed.", repoID)
-				continue
-			}
-
-			if r.DiskUsage < 10 {
-				log.Printf("Repository %s is small; checking user...", repoID)
-				if anlz.AnalyzeUser(ctx, client, r.Owner) {
-					if _, exists := suspiciousUserCache.Load(r.Owner); !exists {
-						if err := fileutil.AppendSuspiciousUser(suspiciousUserRecordFile, r.Owner); err != nil {
-							log.Printf("Recording suspicious user %s: %v", r.Owner, err)
-						} else {
-							suspiciousUserCache.Store(r.Owner, true)
-						}
-						log.Printf("Suspicious user detected: %s", r.Owner)
-					}
-				}
-			}
-
-			if r.DiskUsage > 0 {
-				if err := repo.AnalyzeRepo(ctx, client, r.Owner, r.Name, malRepoFile, malStargazerFile); err != nil {
-					if strings.Contains(err.Error(), "403") {
-						// Propagate fatal 403 errors by cancelling.
-						select {
-						case errChan <- err:
-						default:
-						}
-						return
-					}
-					log.Printf("Error analyzing repo %s: %v", repoID, err)
-				}
-			} else {
-				log.Printf("Skipping README analysis for repository %s due to low disk usage.", repoID)
-			}
-
-			if err := fileutil.AppendProcessedRepo(recordFile, repoID); err != nil {
-				log.Printf("Recording processed repository %s: %v", repoID, err)
-			}
-			state.processedRepos.Store(repoID, true)
-		}
-	}
-}
-
-// SearchAndProcessRepositories queries GitHub and dispatches jobs.
-func SearchAndProcessRepositories(ctx context.Context, client *githubv4.Client, queryStr string,
-	cfg *config.Config, state *State, anlz *analyzer.Analyzer) (time.Time, error) {
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	jobs := make(chan *repo.Repo)
-	errChan := make(chan error, 1) // Buffered channel to avoid blocking.
-	var wg sync.WaitGroup
-
-	suspiciousUserCache := &sync.Map{}
-
-	for i := 0; i < cfg.NumWorkers; i++ {
-		wg.Add(1)
-		go worker(ctx, client, jobs, state, anlz,
-			cfg.RecordFile, cfg.SuspiciousUserRecordFile, cfg.MalRepoFile, cfg.MalStargazerFile,
-			suspiciousUserCache, &wg, errChan)
-	}
-
+// SearchAndProcessRepositories searches GitHub for repositories matching the query,
+// then processes each repository concurrently while limiting parallelism.
+func SearchAndProcessRepositories(
+	ctx context.Context,
+	client *githubv4.Client,
+	queryStr string,
+	cfg *config.Config,
+	anlz *analyzer.Analyzer,
+	database *db.Database,
+	processedUsers map[string]bool, // For safe concurrent access, consider using sync.Map.
+) (time.Time, error) {
 	var oldest time.Time
 	var cursor *githubv4.String
+	var oldestMu sync.Mutex
 
-PAGE_LOOP:
+	// Iterate through pages until there are no more results or max pages reached.
 	for page := 1; page <= cfg.MaxPages; page++ {
 		var q struct {
 			RateLimit struct {
@@ -143,10 +65,10 @@ PAGE_LOOP:
 		}
 
 		if err := client.Query(ctx, &q, variables); err != nil {
-			close(jobs)
-			return oldest, fmt.Errorf("searching repositories on page %d: %w", page, err)
+			return oldest, fmt.Errorf("error on page %d searching repositories: %w", page, err)
 		}
 
+		// If rate limits are nearly exceeded, sleep until the reset time.
 		if q.RateLimit.Remaining < 100 {
 			resetTime := q.RateLimit.ResetAt.Time
 			sleepDuration := time.Until(resetTime) + time.Second
@@ -159,45 +81,110 @@ PAGE_LOOP:
 			break
 		}
 
-		for _, node := range q.Search.Nodes {
-			r := &repo.Repo{
-				Owner:          string(node.Repository.Owner.Login),
-				Name:           string(node.Repository.Name),
-				UpdatedAt:      node.Repository.UpdatedAt.Time,
-				DiskUsage:      node.Repository.DiskUsage,
-				StargazerCount: node.Repository.StargazerCount,
-			}
-			// Use a non-blocking send so that it can exit early when ctx is canceled.
-			select {
-			case jobs <- r:
-			case <-ctx.Done():
-				break PAGE_LOOP
-			}
+		// Use errgroup and a semaphore to process repositories concurrently.
+		eg, egCtx := errgroup.WithContext(ctx)
+		sem := make(chan struct{}, cfg.MaxConcurrent)
 
-			if oldest.IsZero() || r.UpdatedAt.Before(oldest) {
-				oldest = r.UpdatedAt
-			}
+		for _, node := range q.Search.Nodes {
+			node := node // capture range variable
+			sem <- struct{}{}
+			eg.Go(func() error {
+				defer func() { <-sem }()
+
+				repoItem := &analyzer.Repo{
+					Owner:          string(node.Repository.Owner.Login),
+					Name:           string(node.Repository.Name),
+					UpdatedAt:      node.Repository.UpdatedAt.Time,
+					DiskUsage:      node.Repository.DiskUsage,
+					StargazerCount: node.Repository.StargazerCount,
+				}
+				repoID := fmt.Sprintf("%s/%s", repoItem.Owner, repoItem.Name)
+
+				// For small repositories, analyze the user.
+				if repoItem.DiskUsage < 10 {
+					if processedUsers[repoItem.Owner] {
+						log.Printf("User %s already processed; skipping analysis.", repoItem.Owner)
+					} else {
+						log.Printf("Repository %s is small; analyzing user %s.", repoID, repoItem.Owner)
+						analysis, err := anlz.AnalyzeUser(egCtx, client, repoItem.Owner)
+						if err != nil {
+							log.Printf("Error analyzing user %s: %v", repoItem.Owner, err)
+						} else {
+							if analysis.Suspicious {
+								if err := database.InsertHeuristicFlag("user", repoItem.Owner, "Suspicious user detected"); err != nil {
+									log.Printf("Error recording suspicious user %s: %v", repoItem.Owner, err)
+								} else {
+									log.Printf("Suspicious user detected: %s", repoItem.Owner)
+								}
+							}
+							if err := database.InsertProcessedUser(
+								repoItem.Owner,
+								time.Now(),
+								analysis.TotalStars,
+								analysis.EmptyCount,
+								analysis.SuspiciousEmptyCount,
+								analysis.Contributions,
+								analysis.FlagOriginal,
+								analysis.FlagNew,
+								analysis.FlagRecent,
+								analysis.Suspicious,
+							); err != nil {
+								log.Printf("Error recording processed user %s: %v", repoItem.Owner, err)
+							}
+						}
+						processedUsers[repoItem.Owner] = true
+					}
+				}
+
+				// Analyze the repository README if disk usage is nonzero.
+				var isMalicious bool
+				if repoItem.DiskUsage > 0 {
+					var err error
+					isMalicious, err = analyzer.AnalyzeRepo(egCtx, client, database, repoItem.Owner, repoItem.Name)
+					if err != nil {
+						// On a 403 error, cancel processing.
+						if strings.Contains(err.Error(), "403") {
+							return err
+						}
+						log.Printf("Error analyzing repository %s: %v", repoID, err)
+					}
+				} else {
+					log.Printf("Skipping README analysis for repository %s due to low disk usage.", repoID)
+				}
+
+				// Insert repository processing record.
+				if err := database.InsertProcessedRepo(
+					repoID,
+					repoItem.Owner,
+					repoItem.Name,
+					repoItem.UpdatedAt,
+					repoItem.DiskUsage,
+					repoItem.StargazerCount,
+					isMalicious,
+				); err != nil {
+					log.Printf("Error recording processed repository %s: %v", repoID, err)
+				}
+
+				// Thread-safe update of the oldest timestamp.
+				oldestMu.Lock()
+				if oldest.IsZero() || repoItem.UpdatedAt.Before(oldest) {
+					oldest = repoItem.UpdatedAt
+				}
+				oldestMu.Unlock()
+				return nil
+			})
 		}
+
+		// Wait for all repository processing routines to finish.
+		if err := eg.Wait(); err != nil {
+			return oldest, err
+		}
+
 		if !q.Search.PageInfo.HasNextPage {
-			break PAGE_LOOP
+			break
 		}
 		cursor = &q.Search.PageInfo.EndCursor
-
-		select {
-		case err := <-errChan:
-			cancel()
-			close(jobs)
-			return oldest, err
-		default:
-		}
 	}
-	close(jobs)
-	wg.Wait()
 
-	select {
-	case err := <-errChan:
-		return oldest, err
-	default:
-	}
 	return oldest, nil
 }
