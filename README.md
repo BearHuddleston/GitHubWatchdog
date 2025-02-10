@@ -20,15 +20,15 @@ GitHubWatchdog/
 └── internal/
     ├── analyzer/
     │   ├── analyzer.go       # Contains user heuristics and analysis logic.
-    │   ├── heuristic.go      # Defines heuristic rules for suspicious activity detection.
+    │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
     ├── config/
     │   └── config.go         # Reads environment variables and sets default configuration.
     ├── db/
     │   └── sqlite.go         # Implements SQLite-based storage for processed users and repositories.
     ├── github/
     │   └── client.go         # Sets up the GitHub GraphQL client.
-    ├── processor/
-    │   └── processor.go      # Coordinates repository search, worker pool, and processing.
+    └── processor/
+        └── processor.go      # Coordinates repository search, worker pool, and processing.
 ```
 
 This structure allows each package to have a single responsibility, keeping the codebase simple and aligned with Go best practices.
