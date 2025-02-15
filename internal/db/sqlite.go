@@ -126,3 +126,18 @@ func (d *Database) GetProcessedUsers() (map[string]bool, error) {
 	}
 	return processed, nil
 }
+
+// WasRepoProcessed checks if a repository was already processed and
+// if its stored updated_at timestamp is as recent as the given updatedAt.
+func (d *Database) WasRepoProcessed(repoID string, updatedAt time.Time) (bool, error) {
+	var storedUpdatedAt time.Time
+	err := d.QueryRow("SELECT updated_at FROM processed_repositories WHERE repo_id = ?", repoID).Scan(&storedUpdatedAt)
+	if err == sql.ErrNoRows {
+		// Repository not processed.
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	// If our repo's updatedAt is not later than the stored one, it's already up to date.
+	return !updatedAt.After(storedUpdatedAt), nil
+}
