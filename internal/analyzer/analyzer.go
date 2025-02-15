@@ -247,44 +247,44 @@ func AnalyzeRepo(ctx context.Context, client *githubv4.Client, database *db.Data
 	log.Printf("Repository %s/%s identified as malicious.", owner, repoName)
 
 	// Process stargazers to flag malicious interest.
-	var sgQuery struct {
-		Repository struct {
-			Stargazers struct {
-				PageInfo struct {
-					HasNextPage bool
-					EndCursor   githubv4.String
-				}
-				Nodes []struct {
-					Login githubv4.String
-				}
-			} `graphql:"stargazers(first: $perPage, after: $after)"`
-		} `graphql:"repository(owner: $owner, name: $name)"`
-	}
-	perPage := 100
-	var cursor *githubv4.String
-	for {
-		vars := map[string]interface{}{
-			"owner":   githubv4.String(owner),
-			"name":    githubv4.String(repoName),
-			"perPage": githubv4.Int(perPage),
-			"after":   cursor,
-		}
-		if err := client.Query(ctx, &sgQuery, vars); err != nil {
-			log.Printf("Error fetching stargazers for %s/%s: %v", owner, repoName, err)
-			break
-		}
-		for _, user := range sgQuery.Repository.Stargazers.Nodes {
-			login := string(user.Login)
-			flagDescription := fmt.Sprintf("Malicious stargazer detected in repository %s/%s", owner, repoName)
-			if err := database.InsertHeuristicFlag("stargazer", login, flagDescription); err != nil {
-				log.Printf("Error inserting flag for stargazer %s: %v", login, err)
-			}
-		}
-		if !sgQuery.Repository.Stargazers.PageInfo.HasNextPage {
-			break
-		}
-		cursor = &sgQuery.Repository.Stargazers.PageInfo.EndCursor
-	}
+	// var sgQuery struct {
+	// 	Repository struct {
+	// 		Stargazers struct {
+	// 			PageInfo struct {
+	// 				HasNextPage bool
+	// 				EndCursor   githubv4.String
+	// 			}
+	// 			Nodes []struct {
+	// 				Login githubv4.String
+	// 			}
+	// 		} `graphql:"stargazers(first: $perPage, after: $after)"`
+	// 	} `graphql:"repository(owner: $owner, name: $name)"`
+	// }
+	// perPage := 100
+	// var cursor *githubv4.String
+	// for {
+	// 	vars := map[string]interface{}{
+	// 		"owner":   githubv4.String(owner),
+	// 		"name":    githubv4.String(repoName),
+	// 		"perPage": githubv4.Int(perPage),
+	// 		"after":   cursor,
+	// 	}
+	// 	if err := client.Query(ctx, &sgQuery, vars); err != nil {
+	// 		log.Printf("Error fetching stargazers for %s/%s: %v", owner, repoName, err)
+	// 		break
+	// 	}
+	// 	for _, user := range sgQuery.Repository.Stargazers.Nodes {
+	// 		login := string(user.Login)
+	// 		flagDescription := fmt.Sprintf("Malicious stargazer detected in repository %s/%s", owner, repoName)
+	// 		if err := database.InsertHeuristicFlag("stargazer", login, flagDescription); err != nil {
+	// 			log.Printf("Error inserting flag for stargazer %s: %v", login, err)
+	// 		}
+	// 	}
+	// 	if !sgQuery.Repository.Stargazers.PageInfo.HasNextPage {
+	// 		break
+	// 	}
+	// 	cursor = &sgQuery.Repository.Stargazers.PageInfo.EndCursor
+	// }
 
 	return true, nil
 }
