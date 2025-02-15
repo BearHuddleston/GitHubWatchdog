@@ -100,7 +100,16 @@ func SearchAndProcessRepositories(
 				}
 				repoID := fmt.Sprintf("%s/%s", repoItem.Owner, repoItem.Name)
 
-				// For small repositories, analyze the user.
+				// Avoid re‑processing an unchanged repository.
+				alreadyProcessed, err := database.WasRepoProcessed(repoID, repoItem.UpdatedAt)
+				if err != nil {
+					log.Printf("Error checking processed repo %s: %v", repoID, err)
+				} else if alreadyProcessed {
+					log.Printf("Repository %s already processed; skipping.", repoID)
+					return nil
+				}
+
+				// Process small repositories' users if needed.
 				if repoItem.DiskUsage < 10 {
 					if processedUsers[repoItem.Owner] {
 						log.Printf("User %s already processed; skipping analysis.", repoItem.Owner)
@@ -133,13 +142,11 @@ func SearchAndProcessRepositories(
 					}
 				}
 
-				// Analyze the repository README if disk usage is nonzero.
+				// Analyze repository README if applicable.
 				var isMalicious bool
 				if repoItem.DiskUsage > 0 {
-					var err error
 					isMalicious, err = analyzer.AnalyzeRepo(egCtx, client, database, repoItem.Owner, repoItem.Name)
 					if err != nil {
-						// On a 403 error, cancel processing.
 						if strings.Contains(err.Error(), "403") {
 							return err
 						}
@@ -149,7 +156,7 @@ func SearchAndProcessRepositories(
 					log.Printf("Skipping README analysis for repository %s due to low disk usage.", repoID)
 				}
 
-				// Insert repository processing record.
+				// Record the processed repository.
 				if err := database.InsertProcessedRepo(
 					repoID,
 					repoItem.Owner,
@@ -162,7 +169,7 @@ func SearchAndProcessRepositories(
 					log.Printf("Error recording processed repository %s: %v", repoID, err)
 				}
 
-				// Thread-safe update of the oldest timestamp.
+				// Update oldest timestamp.
 				oldestMu.Lock()
 				if oldest.IsZero() || repoItem.UpdatedAt.Before(oldest) {
 					oldest = repoItem.UpdatedAt
