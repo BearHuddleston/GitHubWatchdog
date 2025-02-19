@@ -4,7 +4,9 @@ GitHubWatchdog is a Go-based microservice that leverages the GitHub API to searc
 
 I have personally reported **over 3000+ accounts** using this tool.
 
-## Malicious Repositories Examples
+## Malicious Repositories
+
+All has been reported and has be dealt with.
 
 | id  | repo_id                                                                         | owner               | name                                                          | updated_at                | disk_usage | stargazer_count | is_malicious | processed_at        |
 | --- | ------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------- | ------------------------- | ---------- | --------------- | ------------ | ------------------- |
