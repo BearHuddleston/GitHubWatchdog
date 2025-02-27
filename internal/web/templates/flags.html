@@ -2,11 +2,11 @@
 <table>
     <thead>
         <tr>
-            <th>ID</th>
-            <th>Type</th>
-            <th>Entity</th>
-            <th>Flag</th>
-            <th>Triggered</th>
+            <th class="sortable" data-column="id">ID</th>
+            <th class="sortable" data-column="entity_type">Type</th>
+            <th class="sortable" data-column="entity_id">Entity</th>
+            <th class="sortable" data-column="flag">Flag</th>
+            <th class="sortable" data-column="triggered_at">Triggered</th>
         </tr>
     </thead>
     <tbody>
@@ -32,25 +32,48 @@
     </tbody>
 </table>
 
-{{if gt .TotalPages 1}}
-<div class="pagination">
-    {{if gt .Page 1}}
-    <a href="/flags?page={{subtract .Page 1}}&limit={{.Limit}}">&laquo; Previous</a>
-    {{end}}
-    
-    {{range $i := seq 1 .TotalPages}}
-        {{if and (ge $i (subtract $.Page 2)) (le $i (add $.Page 2))}}
-            {{if eq $i $.Page}}
-            <a href="/flags?page={{$i}}&limit={{$.Limit}}" class="active">{{$i}}</a>
-            {{else}}
-            <a href="/flags?page={{$i}}&limit={{$.Limit}}">{{$i}}</a>
+<div class="page-controls">
+    <div class="page-size">
+        <label for="page-size">Show:</label>
+        <select id="page-size" onchange="changePageSize(this.value)">
+            <option value="25" {{if eq .Limit 25}}selected{{end}}>25</option>
+            <option value="50" {{if eq .Limit 50}}selected{{end}}>50</option>
+            <option value="100" {{if eq .Limit 100}}selected{{end}}>100</option>
+            <option value="200" {{if eq .Limit 200}}selected{{end}}>200</option>
+            <option value="500" {{if eq .Limit 500}}selected{{end}}>500</option>
+        </select>
+        <span>records per page</span>
+    </div>
+
+    {{if gt .TotalPages 1}}
+    <div class="pagination">
+        {{if gt .Page 1}}
+        <a href="/flags?page={{subtract .Page 1}}&limit={{.Limit}}&sort={{.SortBy}}&order={{.SortOrder}}">&laquo; Previous</a>
+        {{end}}
+        
+        {{range $i := seq 1 .TotalPages}}
+            {{if and (ge $i (subtract $.Page 2)) (le $i (add $.Page 2))}}
+                {{if eq $i $.Page}}
+                <a href="/flags?page={{$i}}&limit={{$.Limit}}&sort={{$.SortBy}}&order={{.SortOrder}}" class="active">{{$i}}</a>
+                {{else}}
+                <a href="/flags?page={{$i}}&limit={{$.Limit}}&sort={{$.SortBy}}&order={{.SortOrder}}">{{$i}}</a>
+                {{end}}
             {{end}}
         {{end}}
-    {{end}}
-    
-    {{if lt .Page .TotalPages}}
-    <a href="/flags?page={{add .Page 1}}&limit={{.Limit}}">Next &raquo;</a>
+        
+        {{if lt .Page .TotalPages}}
+        <a href="/flags?page={{add .Page 1}}&limit={{.Limit}}&sort={{.SortBy}}&order={{.SortOrder}}">Next &raquo;</a>
+        {{end}}
+    </div>
     {{end}}
 </div>
-{{end}}
+
+<script>
+function changePageSize(size) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('limit', size);
+    url.searchParams.set('page', 1); // Reset to first page
+    window.location.href = url.toString();
+}
+</script>
 {{end}}

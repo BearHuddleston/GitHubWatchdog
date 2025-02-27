@@ -107,7 +107,501 @@
             border-top: 1px solid #eaeaea;
             padding-top: 20px;
         }
+        
+        /* Sortable table styles */
+        th.sortable {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
+        }
+        
+        th.sortable::after {
+            content: "⇕";
+            position: absolute;
+            right: 5px;
+            color: #999;
+        }
+        
+        th.sortable.asc::after {
+            content: "↑";
+            color: #333;
+        }
+        
+        th.sortable.desc::after {
+            content: "↓";
+            color: #333;
+        }
+        
+        /* Page controls */
+        .page-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        
+        .page-size {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-right: 20px;
+        }
+        
+        .page-size select {
+            padding: 5px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        /* Status styles */
+        .status-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-indicator {
+            font-weight: bold;
+            padding: 3px 8px;
+            border-radius: 4px;
+            display: inline-block;
+        }
+        
+        .status-indicator.clean {
+            background-color: #e6ffed;
+            color: #28a745;
+            border: 1px solid #28a745;
+        }
+        
+        .status-indicator.malicious, .status-indicator.suspicious {
+            background-color: #ffeef0;
+            color: #d73a49;
+            border: 1px solid #d73a49;
+        }
+        
+        .status-toggle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background-color: #f6f8fa;
+            border: 1px solid #ddd;
+            color: #586069;
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+        
+        .status-toggle:hover {
+            background-color: #0366d6;
+            color: white;
+            border-color: #0366d6;
+        }
+        
+        .toggle-icon {
+            font-size: 14px;
+        }
+        
+        /* Report button styles */
+        .username-container, .repo-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .report-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            background-color: #f6f8fa;
+            border: 1px solid #ddd;
+            color: #586069;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            opacity: 0.7;
+        }
+        
+        .report-button:hover {
+            background-color: #0366d6;
+            color: white;
+            border-color: #0366d6;
+            opacity: 1;
+        }
+        
+        .report-icon {
+            font-size: 14px;
+        }
+        
+        /* Report modal */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        
+        .modal-content {
+            background-color: #fff;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .modal-title {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        
+        .close-button {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #586069;
+        }
+        
+        .close-button:hover {
+            color: #000;
+        }
+        
+        .report-section {
+            margin-bottom: 20px;
+        }
+        
+        .report-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #24292e;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .error {
+            color: #d73a49;
+            background-color: #ffeef0;
+            border: 1px solid #f9d0d4;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        /* Markdown content styles */
+        .markdown-content {
+            line-height: 1.5;
+        }
+        
+        .markdown-content h1,
+        .markdown-content h2,
+        .markdown-content h3,
+        .markdown-content h4,
+        .markdown-content h5,
+        .markdown-content h6 {
+            margin-top: 1.5em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+        
+        .markdown-content h1 { font-size: 1.5em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+        .markdown-content h2 { font-size: 1.3em; border-bottom: 1px solid #eaecef; padding-bottom: 0.3em; }
+        .markdown-content h3 { font-size: 1.2em; }
+        .markdown-content h4 { font-size: 1.1em; }
+        .markdown-content h5 { font-size: 1em; }
+        .markdown-content h6 { font-size: 0.9em; color: #6a737d; }
+        
+        .markdown-content p {
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        
+        .markdown-content code {
+            background-color: rgba(27, 31, 35, 0.05);
+            border-radius: 3px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 85%;
+            padding: 0.2em 0.4em;
+        }
+        
+        .markdown-content pre {
+            background-color: #f6f8fa;
+            border-radius: 3px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 85%;
+            line-height: 1.45;
+            overflow: auto;
+            padding: 16px;
+        }
+        
+        .markdown-content pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        
+        .markdown-content a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+        
+        .markdown-content a:hover {
+            text-decoration: underline;
+        }
+        
+        .markdown-content blockquote {
+            border-left: 0.25em solid #dfe2e5;
+            color: #6a737d;
+            margin: 0 0 16px 0;
+            padding: 0 1em;
+        }
+        
+        .markdown-content ul,
+        .markdown-content ol {
+            margin-top: 0;
+            margin-bottom: 16px;
+            padding-left: 2em;
+        }
+        
+        .markdown-content img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .markdown-content hr {
+            height: 0.25em;
+            padding: 0;
+            margin: 24px 0;
+            background-color: #e1e4e8;
+            border: 0;
+        }
     </style>
+    <script src="/static/js/markdown.js"></script>
+    <script>
+        // Pass the current sort parameters to JavaScript
+        const currentSort = "{{.SortBy}}";
+        const currentSortOrder = "{{.SortOrder}}";
+        
+        // Status toggle functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.status-toggle').forEach(toggle => {
+                toggle.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    const id = this.dataset.id;
+                    const currentStatus = this.dataset.current;
+                    const type = this.dataset.type;
+                    
+                    let newStatus;
+                    if (type === 'repository') {
+                        newStatus = currentStatus === 'clean' ? 'malicious' : 'clean';
+                    } else if (type === 'user') {
+                        newStatus = currentStatus === 'clean' ? 'suspicious' : 'clean';
+                    }
+                    
+                    // Create a form and submit it
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = type === 'repository' ? '/api/repository/status' : '/api/user/status';
+                    
+                    // Add the ID field
+                    const idField = document.createElement('input');
+                    idField.type = 'hidden';
+                    idField.name = type === 'repository' ? 'repo_id' : 'user_id';
+                    idField.value = id;
+                    form.appendChild(idField);
+                    
+                    // Add the status field
+                    const statusField = document.createElement('input');
+                    statusField.type = 'hidden';
+                    statusField.name = 'status';
+                    statusField.value = newStatus;
+                    form.appendChild(statusField);
+                    
+                    // Submit the form
+                    document.body.appendChild(form);
+                    form.submit();
+                });
+            });
+        });
+        
+        // Report modal functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add modal to the page
+            const modalHtml = `
+                <div id="reportModal" class="modal">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h2 class="modal-title">Report</h2>
+                            <button class="close-button" id="closeModal">&times;</button>
+                        </div>
+                        <div id="reportContent">
+                            <div class="loading">Loading report...</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+            
+            // Get modal elements
+            const modal = document.getElementById('reportModal');
+            const closeModal = document.getElementById('closeModal');
+            const reportContent = document.getElementById('reportContent');
+            
+            // Close modal when clicking the close button
+            closeModal.addEventListener('click', function() {
+                modal.style.display = 'none';
+            });
+            
+            // Close modal when clicking outside the modal content
+            window.addEventListener('click', function(event) {
+                if (event.target === modal) {
+                    modal.style.display = 'none';
+                }
+            });
+            
+            // Handle report button clicks for users
+            document.querySelectorAll('.report-button[data-username]').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const username = this.dataset.username;
+                    
+                    // Show modal
+                    modal.style.display = 'block';
+                    reportContent.innerHTML = '<div class="loading">Loading report for user: ' + username + '...</div>';
+                    
+                    // Fetch user report from API
+                    fetch(`/api/report/user?username=${encodeURIComponent(username)}`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`Error: ${response.status} ${response.statusText}`);
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            const userReport = `
+                                <div class="report-section">
+                                    <h3>User Summary: ${data.username}</h3>
+                                    <p>Account created: ${new Date(data.created_at).toLocaleDateString()}</p>
+                                    <p>Repositories: ${data.repo_count || 'N/A'}</p>
+                                    <p>Empty repositories: ${data.empty_count}</p>
+                                    <p>Suspicious empty repositories: ${data.suspicious_empty_count}</p>
+                                </div>
+                                <div class="report-section">
+                                    <h3>Activity Analysis</h3>
+                                    <p>Total stars collected: ${data.total_stars}</p>
+                                    <p>Total contributions: ${data.contributions}</p>
+                                    <p>Account status: <span class="status-indicator ${data.is_suspicious ? 'suspicious' : 'clean'}">${data.is_suspicious ? 'SUSPICIOUS' : 'CLEAN'}</span></p>
+                                    <p>Last analyzed: ${data.processed_at ? new Date(data.processed_at).toLocaleString() : 'Not yet processed'}</p>
+                                </div>
+                                ${data.heuristic_flags && data.heuristic_flags.length > 0 ? `
+                                <div class="report-section">
+                                    <h3>Detected Flags</h3>
+                                    <ul>
+                                        ${data.heuristic_flags.map(flag => `<li>${flag}</li>`).join('')}
+                                    </ul>
+                                </div>
+                                ` : ''}
+                            `;
+                            reportContent.innerHTML = userReport;
+                        })
+                        .catch(error => {
+                            reportContent.innerHTML = `<div class="error">Error loading report: ${error.message}</div>`;
+                        });
+                });
+            });
+            
+            // Handle report button clicks for repositories
+            document.querySelectorAll('.report-button[data-repo]').forEach(button => {
+                button.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const owner = this.dataset.owner;
+                    const repo = this.dataset.repo;
+                    
+                    // Show modal
+                    modal.style.display = 'block';
+                    reportContent.innerHTML = '<div class="loading">Loading report for repository: ' + owner + '/' + repo + '...</div>';
+                    
+                    // Fetch repository report from API
+                    fetch(`/api/report/repository?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`)
+                        .then(response => {
+                            if (!response.ok) {
+                                throw new Error(`Error: ${response.status} ${response.statusText}`);
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            const filesSection = data.files && data.files.length > 0 ? `
+                                <div class="report-section">
+                                    <h3>Files (up to 50 shown)</h3>
+                                    <div style="max-height: 200px; overflow-y: auto; font-size: 0.9em;">
+                                        <ul style="columns: ${data.files.length > 20 ? 2 : 1};">
+                                            ${data.files.map(file => `<li>${file}</li>`).join('')}
+                                        </ul>
+                                    </div>
+                                </div>` : '';
+                                
+                            const readmeSection = data.readme_content ? `
+                                <div class="report-section">
+                                    <h3>README Preview</h3>
+                                    <div class="markdown-content" style="max-height: 300px; overflow-y: auto; font-size: 0.9em; background: #f6f8fa; padding: 15px; border-radius: 4px;">
+                                        ${markdownRenderer.render(data.readme_content)}
+                                    </div>
+                                </div>` : '';
+                                
+                            const repoReport = `
+                                <div class="report-section">
+                                    <h3>Repository Summary: ${data.owner}/${data.name}</h3>
+                                    <p>Last updated: ${new Date(data.updated_at).toLocaleDateString()}</p>
+                                    <p>Size: ${data.size} KB</p>
+                                    <p>Stars: ${data.stars}</p>
+                                    <p>Status: <span class="status-indicator ${data.is_malicious ? 'malicious' : 'clean'}">${data.is_malicious ? 'MALICIOUS' : 'CLEAN'}</span></p>
+                                    <p>Last analyzed: ${data.processed_at ? new Date(data.processed_at).toLocaleString() : 'Not yet processed'}</p>
+                                </div>
+                                ${data.heuristic_flags && data.heuristic_flags.length > 0 ? `
+                                <div class="report-section">
+                                    <h3>Detected Flags</h3>
+                                    <ul>
+                                        ${data.heuristic_flags.map(flag => `<li>${flag}</li>`).join('')}
+                                    </ul>
+                                </div>
+                                ` : ''}
+                                ${filesSection}
+                                ${readmeSection}
+                            `;
+                            reportContent.innerHTML = repoReport;
+                        })
+                        .catch(error => {
+                            reportContent.innerHTML = `<div class="error">Error loading report: ${error.message}</div>`;
+                        });
+                });
+            });
+        });
+    </script>
+    <script src="/static/js/sort.js"></script>
 </head>
 <body>
     <header>

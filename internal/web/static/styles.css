@@ -1,0 +1,104 @@
+/* Base styles */
+body {
+    font-family: Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    padding: 20px;
+    color: #333;
+}
+
+h1, h2, h3 {
+    margin-bottom: 1rem;
+}
+
+/* Table styles */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+th, td {
+    padding: 10px;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+th:hover {
+    background-color: #e6e6e6;
+}
+
+tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+tr:hover {
+    background-color: #f0f0f0;
+}
+
+/* Sortable table headers */
+th.sortable {
+    cursor: pointer;
+    position: relative;
+    padding-right: 20px;
+}
+
+th.sortable::after {
+    content: "⇕";
+    position: absolute;
+    right: 5px;
+    color: #999;
+}
+
+th.sortable.asc::after {
+    content: "↑";
+    color: #333;
+}
+
+th.sortable.desc::after {
+    content: "↓";
+    color: #333;
+}
+
+/* Status indicators */
+.malicious {
+    color: #cc0000;
+    font-weight: bold;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    margin: 20px 0;
+}
+
+.pagination a {
+    color: #333;
+    text-decoration: none;
+    padding: 8px 16px;
+    margin: 0 5px;
+    border: 1px solid #ddd;
+    transition: background-color 0.3s;
+}
+
+.pagination a.active {
+    background-color: #007bff;
+    color: white;
+    border: 1px solid #007bff;
+}
+
+.pagination a:hover:not(.active) {
+    background-color: #ddd;
+}
+
+/* Timestamp formatting */
+.timestamp {
+    white-space: nowrap;
+}

@@ -2,28 +2,44 @@
 <table>
     <thead>
         <tr>
-            <th>ID</th>
-            <th>Username</th>
-            <th>Created</th>
-            <th>Stars</th>
-            <th>Empty Repos</th>
-            <th>Suspicious Empty</th>
-            <th>Contributions</th>
-            <th>Status</th>
-            <th>Processed</th>
+            <th class="sortable" data-column="id">ID</th>
+            <th class="sortable" data-column="username">Username</th>
+            <th class="sortable" data-column="created_at">Created</th>
+            <th class="sortable" data-column="total_stars">Stars</th>
+            <th class="sortable" data-column="empty_count">Empty Repos</th>
+            <th class="sortable" data-column="suspicious_empty_count">Suspicious Empty</th>
+            <th class="sortable" data-column="contributions">Contributions</th>
+            <th class="sortable" data-column="analysis_result">Status</th>
+            <th class="sortable" data-column="processed_at">Processed</th>
         </tr>
     </thead>
     <tbody>
         {{range .Users}}
         <tr>
             <td>{{.ID}}</td>
-            <td><a href="https://github.com/{{.Username}}" target="_blank">{{.Username}}</a></td>
+            <td>
+                <div class="username-container">
+                    <a href="https://github.com/{{.Username}}" target="_blank">{{.Username}}</a>
+                    <a href="#" class="report-button" data-username="{{.Username}}" title="Generate report for {{.Username}}">
+                        <span class="report-icon">📊</span>
+                    </a>
+                </div>
+            </td>
             <td class="timestamp">{{.CreatedAt.Format "Jan 02, 2006"}}</td>
             <td>{{.TotalStars}}</td>
             <td>{{.EmptyCount}}</td>
             <td>{{.SuspiciousEmptyCount}}</td>
             <td>{{.Contributions}}</td>
-            <td>{{if .AnalysisResult}}<span class="malicious">SUSPICIOUS</span>{{else}}Clean{{end}}</td>
+            <td>
+                <div class="status-container">
+                    <span class="status-indicator {{if .AnalysisResult}}suspicious{{else}}clean{{end}}">
+                        {{if .AnalysisResult}}SUSPICIOUS{{else}}CLEAN{{end}}
+                    </span>
+                    <a href="#" class="status-toggle" data-id="{{.ID}}" data-current="{{if .AnalysisResult}}suspicious{{else}}clean{{end}}" data-type="user">
+                        <span class="toggle-icon" title="Toggle status">⇄</span>
+                    </a>
+                </div>
+            </td>
             <td class="timestamp">{{.ProcessedAt.Format "Jan 02, 2006 15:04:05"}}</td>
         </tr>
         {{else}}
@@ -34,25 +50,48 @@
     </tbody>
 </table>
 
-{{if gt .TotalPages 1}}
-<div class="pagination">
-    {{if gt .Page 1}}
-    <a href="/users?page={{subtract .Page 1}}&limit={{.Limit}}">&laquo; Previous</a>
-    {{end}}
-    
-    {{range $i := seq 1 .TotalPages}}
-        {{if and (ge $i (subtract $.Page 2)) (le $i (add $.Page 2))}}
-            {{if eq $i $.Page}}
-            <a href="/users?page={{$i}}&limit={{$.Limit}}" class="active">{{$i}}</a>
-            {{else}}
-            <a href="/users?page={{$i}}&limit={{$.Limit}}">{{$i}}</a>
+<div class="page-controls">
+    <div class="page-size">
+        <label for="page-size">Show:</label>
+        <select id="page-size" onchange="changePageSize(this.value)">
+            <option value="25" {{if eq .Limit 25}}selected{{end}}>25</option>
+            <option value="50" {{if eq .Limit 50}}selected{{end}}>50</option>
+            <option value="100" {{if eq .Limit 100}}selected{{end}}>100</option>
+            <option value="200" {{if eq .Limit 200}}selected{{end}}>200</option>
+            <option value="500" {{if eq .Limit 500}}selected{{end}}>500</option>
+        </select>
+        <span>records per page</span>
+    </div>
+
+    {{if gt .TotalPages 1}}
+    <div class="pagination">
+        {{if gt .Page 1}}
+        <a href="/users?page={{subtract .Page 1}}&limit={{.Limit}}&sort={{.SortBy}}&order={{.SortOrder}}">&laquo; Previous</a>
+        {{end}}
+        
+        {{range $i := seq 1 .TotalPages}}
+            {{if and (ge $i (subtract $.Page 2)) (le $i (add $.Page 2))}}
+                {{if eq $i $.Page}}
+                <a href="/users?page={{$i}}&limit={{$.Limit}}&sort={{$.SortBy}}&order={{$.SortOrder}}" class="active">{{$i}}</a>
+                {{else}}
+                <a href="/users?page={{$i}}&limit={{$.Limit}}&sort={{$.SortBy}}&order={{$.SortOrder}}">{{$i}}</a>
+                {{end}}
             {{end}}
         {{end}}
-    {{end}}
-    
-    {{if lt .Page .TotalPages}}
-    <a href="/users?page={{add .Page 1}}&limit={{.Limit}}">Next &raquo;</a>
+        
+        {{if lt .Page .TotalPages}}
+        <a href="/users?page={{add .Page 1}}&limit={{.Limit}}&sort={{.SortBy}}&order={{.SortOrder}}">Next &raquo;</a>
+        {{end}}
+    </div>
     {{end}}
 </div>
-{{end}}
+
+<script>
+function changePageSize(size) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('limit', size);
+    url.searchParams.set('page', 1); // Reset to first page
+    window.location.href = url.toString();
+}
+</script>
 {{end}}
