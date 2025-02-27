@@ -87,6 +87,8 @@ func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
 		UserCount       int
 		SuspiciousCount int
 		FlagCount       int
+		SortBy          string
+		SortOrder       string
 	}{
 		PageData: PageData{
 			Title:       "GitHub Watchdog Dashboard",
@@ -97,6 +99,8 @@ func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
 		UserCount:       userCount,
 		SuspiciousCount: suspiciousCount,
 		FlagCount:       flagCount,
+		SortBy:          "",
+		SortOrder:       "",
 	}
 
 	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
@@ -118,8 +122,9 @@ func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
 // repositoriesHandler handles the repositories page
 func (s *Server) repositoriesHandler(w http.ResponseWriter, r *http.Request) {
 	page, limit := getPaginationParams(r)
+	sortBy, sortOrder := getSortParams(r)
 
-	repos, totalCount, err := s.getRepositories(page, limit)
+	repos, totalCount, err := s.getRepositories(page, limit, sortBy, sortOrder)
 	if err != nil {
 		s.logger.Error("Error getting repositories: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -133,6 +138,8 @@ func (s *Server) repositoriesHandler(w http.ResponseWriter, r *http.Request) {
 		Limit        int
 		TotalCount   int
 		TotalPages   int
+		SortBy       string
+		SortOrder    string
 	}{
 		PageData: PageData{
 			Title:       "Repositories",
@@ -143,6 +150,8 @@ func (s *Server) repositoriesHandler(w http.ResponseWriter, r *http.Request) {
 		Limit:        limit,
 		TotalCount:   totalCount,
 		TotalPages:   (totalCount + limit - 1) / limit,
+		SortBy:       sortBy,
+		SortOrder:    sortOrder,
 	}
 
 	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
@@ -164,8 +173,9 @@ func (s *Server) repositoriesHandler(w http.ResponseWriter, r *http.Request) {
 // usersHandler handles the users page
 func (s *Server) usersHandler(w http.ResponseWriter, r *http.Request) {
 	page, limit := getPaginationParams(r)
+	sortBy, sortOrder := getSortParams(r)
 
-	users, totalCount, err := s.getUsers(page, limit)
+	users, totalCount, err := s.getUsers(page, limit, sortBy, sortOrder)
 	if err != nil {
 		s.logger.Error("Error getting users: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -179,6 +189,8 @@ func (s *Server) usersHandler(w http.ResponseWriter, r *http.Request) {
 		Limit      int
 		TotalCount int
 		TotalPages int
+		SortBy     string
+		SortOrder  string
 	}{
 		PageData: PageData{
 			Title:       "Users",
@@ -189,6 +201,8 @@ func (s *Server) usersHandler(w http.ResponseWriter, r *http.Request) {
 		Limit:      limit,
 		TotalCount: totalCount,
 		TotalPages: (totalCount + limit - 1) / limit,
+		SortBy:     sortBy,
+		SortOrder:  sortOrder,
 	}
 
 	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
@@ -210,8 +224,9 @@ func (s *Server) usersHandler(w http.ResponseWriter, r *http.Request) {
 // flagsHandler handles the flags page
 func (s *Server) flagsHandler(w http.ResponseWriter, r *http.Request) {
 	page, limit := getPaginationParams(r)
+	sortBy, sortOrder := getSortParams(r)
 
-	flags, totalCount, err := s.getFlags(page, limit)
+	flags, totalCount, err := s.getFlags(page, limit, sortBy, sortOrder)
 	if err != nil {
 		s.logger.Error("Error getting flags: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -225,6 +240,8 @@ func (s *Server) flagsHandler(w http.ResponseWriter, r *http.Request) {
 		Limit      int
 		TotalCount int
 		TotalPages int
+		SortBy     string
+		SortOrder  string
 	}{
 		PageData: PageData{
 			Title:       "Heuristic Flags",
@@ -235,6 +252,8 @@ func (s *Server) flagsHandler(w http.ResponseWriter, r *http.Request) {
 		Limit:      limit,
 		TotalCount: totalCount,
 		TotalPages: (totalCount + limit - 1) / limit,
+		SortBy:     sortBy,
+		SortOrder:  sortOrder,
 	}
 
 	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
@@ -278,4 +297,144 @@ func getPaginationParams(r *http.Request) (int, int) {
 	}
 
 	return page, limit
+}
+
+// getSortParams extracts sorting parameters from the request
+func getSortParams(r *http.Request) (string, string) {
+	// Default values
+	sortBy := ""
+	sortOrder := "DESC"
+	
+	// Parse query parameters
+	if sort := r.URL.Query().Get("sort"); sort != "" {
+		sortBy = sort
+	}
+	
+	if order := r.URL.Query().Get("order"); order != "" {
+		if order == "asc" || order == "ASC" {
+			sortOrder = "ASC"
+		} else if order == "desc" || order == "DESC" {
+			sortOrder = "DESC"
+		}
+	}
+	
+	return sortBy, sortOrder
+}
+
+// updateRepositoryStatusHandler handles repository status updates via API
+func (s *Server) updateRepositoryStatusHandler(w http.ResponseWriter, r *http.Request) {
+	// Only allow POST method
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		s.logger.Error("Error parsing form: %v", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	
+	// Get parameters
+	repoIDStr := r.FormValue("repo_id")
+	statusStr := r.FormValue("status")
+	
+	// Validate parameters
+	if repoIDStr == "" || statusStr == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+	
+	// Parse repository ID
+	repoID, err := strconv.Atoi(repoIDStr)
+	if err != nil {
+		s.logger.Error("Invalid repo ID: %v", err)
+		http.Error(w, "Invalid repository ID", http.StatusBadRequest)
+		return
+	}
+	
+	// Validate status value
+	isMalicious := false
+	if statusStr == "malicious" {
+		isMalicious = true
+	} else if statusStr != "clean" {
+		http.Error(w, "Invalid status value", http.StatusBadRequest)
+		return
+	}
+	
+	// Update repository status in database
+	_, err = s.db.Exec("UPDATE processed_repositories SET is_malicious = ? WHERE id = ?", isMalicious, repoID)
+	if err != nil {
+		s.logger.Error("Error updating repository status: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	
+	// Redirect back to repositories page
+	redirectURL := "/repositories"
+	if referer := r.Header.Get("Referer"); referer != "" {
+		redirectURL = referer
+	}
+	
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
+}
+
+// updateUserStatusHandler handles user status updates via API
+func (s *Server) updateUserStatusHandler(w http.ResponseWriter, r *http.Request) {
+	// Only allow POST method
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	
+	// Parse form data
+	if err := r.ParseForm(); err != nil {
+		s.logger.Error("Error parsing form: %v", err)
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	
+	// Get parameters
+	userIDStr := r.FormValue("user_id")
+	statusStr := r.FormValue("status")
+	
+	// Validate parameters
+	if userIDStr == "" || statusStr == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+	
+	// Parse user ID
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		s.logger.Error("Invalid user ID: %v", err)
+		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		return
+	}
+	
+	// Validate status value
+	analysisResult := false
+	if statusStr == "suspicious" {
+		analysisResult = true
+	} else if statusStr != "clean" {
+		http.Error(w, "Invalid status value", http.StatusBadRequest)
+		return
+	}
+	
+	// Update user status in database
+	_, err = s.db.Exec("UPDATE processed_users SET analysis_result = ? WHERE id = ?", analysisResult, userID)
+	if err != nil {
+		s.logger.Error("Error updating user status: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	
+	// Redirect back to users page
+	redirectURL := "/users"
+	if referer := r.Header.Get("Referer"); referer != "" {
+		redirectURL = referer
+	}
+	
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }

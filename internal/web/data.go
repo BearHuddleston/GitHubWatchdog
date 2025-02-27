@@ -51,7 +51,7 @@ func (s *Server) getFlagCount() (int, error) {
 }
 
 // getRepositories returns a paginated list of repositories
-func (s *Server) getRepositories(page, limit int) ([]RepositoryData, int, error) {
+func (s *Server) getRepositories(page, limit int, sortBy, sortOrder string) ([]RepositoryData, int, error) {
 	offset := (page - 1) * limit
 	
 	// Get total count
@@ -61,14 +61,35 @@ func (s *Server) getRepositories(page, limit int) ([]RepositoryData, int, error)
 		return nil, 0, fmt.Errorf("counting repositories: %w", err)
 	}
 	
-	// Get paginated repositories
-	rows, err := s.db.Query(`
+	// Default sort
+	if sortBy == "" {
+		sortBy = "processed_at"
+	}
+	
+	// Validate the sort column to prevent SQL injection
+	validColumns := map[string]bool{
+		"id": true, "repo_id": true, "owner": true, "name": true, 
+		"updated_at": true, "disk_usage": true, "stargazer_count": true, 
+		"is_malicious": true, "processed_at": true,
+	}
+	
+	if !validColumns[sortBy] {
+		sortBy = "processed_at"
+	}
+	
+	// Validate sort order
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "DESC"
+	}
+	
+	// Get paginated repositories with sorting
+	query := fmt.Sprintf(`
 		SELECT id, repo_id, owner, name, updated_at, disk_usage, stargazer_count, is_malicious, processed_at 
 		FROM processed_repositories 
-		ORDER BY processed_at DESC 
-		LIMIT ? OFFSET ?`,
-		limit, offset,
-	)
+		ORDER BY %s %s 
+		LIMIT ? OFFSET ?`, sortBy, sortOrder)
+		
+	rows, err := s.db.Query(query, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying repositories: %w", err)
 	}
@@ -101,7 +122,7 @@ func (s *Server) getRepositories(page, limit int) ([]RepositoryData, int, error)
 }
 
 // getUsers returns a paginated list of users
-func (s *Server) getUsers(page, limit int) ([]UserData, int, error) {
+func (s *Server) getUsers(page, limit int, sortBy, sortOrder string) ([]UserData, int, error) {
 	offset := (page - 1) * limit
 	
 	// Get total count
@@ -111,15 +132,36 @@ func (s *Server) getUsers(page, limit int) ([]UserData, int, error) {
 		return nil, 0, fmt.Errorf("counting users: %w", err)
 	}
 	
-	// Get paginated users
-	rows, err := s.db.Query(`
+	// Default sort
+	if sortBy == "" {
+		sortBy = "processed_at"
+	}
+	
+	// Validate the sort column to prevent SQL injection
+	validColumns := map[string]bool{
+		"id": true, "username": true, "created_at": true, "total_stars": true, 
+		"empty_count": true, "suspicious_empty_count": true, "contributions": true, 
+		"analysis_result": true, "processed_at": true,
+	}
+	
+	if !validColumns[sortBy] {
+		sortBy = "processed_at"
+	}
+	
+	// Validate sort order
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "DESC"
+	}
+	
+	// Get paginated users with sorting
+	query := fmt.Sprintf(`
 		SELECT id, username, created_at, total_stars, empty_count, 
 		       suspicious_empty_count, contributions, analysis_result, processed_at 
 		FROM processed_users 
-		ORDER BY processed_at DESC 
-		LIMIT ? OFFSET ?`,
-		limit, offset,
-	)
+		ORDER BY %s %s 
+		LIMIT ? OFFSET ?`, sortBy, sortOrder)
+		
+	rows, err := s.db.Query(query, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying users: %w", err)
 	}
@@ -152,7 +194,7 @@ func (s *Server) getUsers(page, limit int) ([]UserData, int, error) {
 }
 
 // getFlags returns a paginated list of heuristic flags
-func (s *Server) getFlags(page, limit int) ([]FlagData, int, error) {
+func (s *Server) getFlags(page, limit int, sortBy, sortOrder string) ([]FlagData, int, error) {
 	offset := (page - 1) * limit
 	
 	// Get total count
@@ -162,14 +204,34 @@ func (s *Server) getFlags(page, limit int) ([]FlagData, int, error) {
 		return nil, 0, fmt.Errorf("counting flags: %w", err)
 	}
 	
-	// Get paginated flags
-	rows, err := s.db.Query(`
+	// Default sort
+	if sortBy == "" {
+		sortBy = "triggered_at"
+	}
+	
+	// Validate the sort column to prevent SQL injection
+	validColumns := map[string]bool{
+		"id": true, "entity_type": true, "entity_id": true, 
+		"flag": true, "triggered_at": true,
+	}
+	
+	if !validColumns[sortBy] {
+		sortBy = "triggered_at"
+	}
+	
+	// Validate sort order
+	if sortOrder != "ASC" && sortOrder != "DESC" {
+		sortOrder = "DESC"
+	}
+	
+	// Get paginated flags with sorting
+	query := fmt.Sprintf(`
 		SELECT id, entity_type, entity_id, flag, triggered_at 
 		FROM heuristic_flags 
-		ORDER BY triggered_at DESC 
-		LIMIT ? OFFSET ?`,
-		limit, offset,
-	)
+		ORDER BY %s %s 
+		LIMIT ? OFFSET ?`, sortBy, sortOrder)
+		
+	rows, err := s.db.Query(query, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("querying flags: %w", err)
 	}

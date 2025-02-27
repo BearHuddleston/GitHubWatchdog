@@ -30,6 +30,12 @@ func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	return d.db.Query(query, args...)
 }
 
+// Exec executes a query without returning any rows.
+// The args are for any placeholder parameters in the query.
+func (d *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return d.db.Exec(query, args...)
+}
+
 // New creates a new database connection and initializes tables
 func New(dbPath string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dbPath)
