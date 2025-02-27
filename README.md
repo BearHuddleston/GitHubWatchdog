@@ -11,29 +11,30 @@ GitHubWatchdog/
 ├── cmd/
 │   └── app/
 │       └── main.go           # Bootstraps the application, initializes dependencies, and starts the search loop.
-├── internal/
-│   ├── analyzer/
-│   │   ├── analyzer.go       # Contains user heuristics and analysis logic.
-│   │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
-│   ├── config/
-│   │   └── config.go         # Reads environment variables and sets default configuration.
-│   ├── db/
-│   │   └── sqlite.go         # Implements SQLite-based storage for processed users and repositories.
-│   ├── github/
-│   │   ├── client.go         # Sets up the GitHub GraphQL client.
-│   │   ├── cache.go          # Implements caching for GitHub API requests.
-│   │   └── rate_limiter.go   # Handles GitHub API rate limiting.
-│   ├── logger/
-│   │   └── logger.go         # Provides logging functionality.
-│   ├── models/
-│   │   └── models.go         # Defines data structures used throughout the application.
-│   └── web/
-│       ├── server.go         # Implements HTTP server for web interface.
-│       ├── handlers.go       # HTTP request handlers for web interface.
-│       ├── data.go           # Database query functions for web interface.
-│       ├── template_funcs.go # Template functions for web interface.
-│       └── templates/        # HTML templates for web interface.
-└── bark/                     # Directory for storing malicious repo information.
+└── internal/
+    ├── analyzer/
+    │   ├── analyzer.go       # Contains user heuristics and analysis logic.
+    │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
+    ├── config/
+    │   └── config.go         # Reads environment variables and sets default configuration.
+    ├── db/
+    │   └── sqlite.go         # Implements SQLite-based storage for processed users and repositories.
+    ├── github/
+    │   ├── client.go         # Sets up the GitHub REST client.
+    │   ├── cache.go          # Implements caching for GitHub API requests.
+    │   └── rate_limiter.go   # Handles GitHub API rate limiting.
+    ├── logger/
+    │   └── logger.go         # Provides logging functionality.
+    ├── models/
+    │   └── models.go         # Defines data structures used throughout the application.
+    └── web/
+        ├── server.go         # Implements HTTP server for web interface.
+        ├── handlers.go       # HTTP request handlers for web interface.
+        ├── data.go           # Database query functions for web interface.
+        ├── api.go            # API endpoints for GitHub data integration.
+        ├── template_funcs.go # Template functions for web interface.
+        ├── templates/        # HTML templates for web interface.
+        └── static/           # Static assets (CSS, JavaScript) for web interface.
 ```
 
 ## Overview
@@ -44,7 +45,7 @@ GitHubWatchdog performs the following tasks:
     Creates an authenticated GitHub client using a personal access token (see `internal/github/client.go`).
 
 -   **Repository Search & Processing:**  
-    Uses GitHub's GraphQL API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are dispatched to a worker pool for concurrent processing (see `internal/processor/processor.go`).
+    Uses GitHub's REST API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are dispatched to a worker pool for concurrent processing (see `internal/processor/processor.go`).
 
 -   **Processed Repository Tracking:**  
     The service tracks processed repositories and users in an SQLite database (`github_watchdog.db`) to avoid duplicate analysis. Database interactions are handled by `internal/db/sqlite.go`.
@@ -101,6 +102,18 @@ go build -o githubwatchdog ./cmd/app
 
 The web server runs on port 8080 by default. You can access it at http://localhost:8080
 
+The web interface includes the following features:
+
+-   **Dashboard**: Overview of processed repositories, users, and detected flags
+-   **Repository View**: List of analyzed repositories with status indicators
+-   **User View**: List of analyzed GitHub users with suspicion status
+-   **Flags View**: List of detected heuristic flags
+-   **Sortable Tables**: Click on column headers to sort data
+-   **Pagination**: Adjustable page size with navigation controls
+-   **Status Toggle**: One-click toggle between clean/malicious or clean/suspicious states
+-   **Detailed Reports**: Real-time reports using GitHub API for repositories and users
+-   **Markdown Rendering**: Properly formatted README display in repository reports
+
 Options:
 
 -   `-web`: Run in web interface mode
@@ -111,6 +124,8 @@ Example with custom port:
 ```bash
 ./githubwatchdog -web -addr=":9090"
 ```
+
+**Note**: A valid GitHub token is required for report functionality, which can be provided through the `GITHUB_TOKEN` environment variable or in the `config.json` file.
 
 ## TO-DO List
 
@@ -149,6 +164,11 @@ Example with custom port:
 ### Web UI Integration
 
 -   ✅ Develop and integrate a web UI for viewing database content
+-   ✅ Add sortable tables with column headers
+-   ✅ Implement pagination and customizable page size
+-   ✅ Add status toggle for repository and user classification
+-   ✅ Integrate detailed reports with GitHub API data
+-   ✅ Implement Markdown rendering for repository READMEs
 -   Enhance web UI with real-time monitoring and scanning process management
 
 ### CI/CD Integration
