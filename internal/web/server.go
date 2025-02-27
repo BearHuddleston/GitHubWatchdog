@@ -12,6 +12,11 @@ import (
 	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
 )
 
+// ServerConfig holds the configuration for the web server
+type ServerConfig struct {
+	GitHubToken string
+}
+
 // Server represents the HTTP server for the web interface
 type Server struct {
 	db      *db.Database
@@ -19,14 +24,18 @@ type Server struct {
 	server  *http.Server
 	addr    string
 	handler http.Handler
+	config  ServerConfig
 }
 
 // NewServer creates a new web server instance
-func NewServer(database *db.Database, addr string, logger *logger.Logger) *Server {
+func NewServer(database *db.Database, addr string, logger *logger.Logger, githubToken string) *Server {
 	s := &Server{
 		db:     database,
 		logger: logger,
 		addr:   addr,
+		config: ServerConfig{
+			GitHubToken: githubToken,
+		},
 	}
 
 	// Set up templates directory
@@ -41,6 +50,10 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger) *Serve
 	mux.HandleFunc("/users", s.usersHandler)
 	mux.HandleFunc("/flags", s.flagsHandler)
 	mux.HandleFunc("/static/", s.staticHandler)
+	mux.HandleFunc("/api/repository/status", s.updateRepositoryStatusHandler)
+	mux.HandleFunc("/api/user/status", s.updateUserStatusHandler)
+	mux.HandleFunc("/api/report/repository", s.repositoryReportHandler)
+	mux.HandleFunc("/api/report/user", s.userReportHandler)
 
 	s.handler = mux
 	s.server = &http.Server{

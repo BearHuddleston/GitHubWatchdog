@@ -87,7 +87,19 @@ func main() {
 
 // runWebServer starts the web server
 func runWebServer(database *db.Database, addr string, appLogger *logger.Logger) {
-	server := web.NewServer(database, addr, appLogger)
+	// Get GitHub token from environment variable or config
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		// Try loading from config
+		cfg, err := config.New("config.json")
+		if err == nil && cfg.Token != "" {
+			token = cfg.Token
+		} else {
+			appLogger.Fatal("GitHub token not found in environment variable or config")
+		}
+	}
+	
+	server := web.NewServer(database, addr, appLogger, token)
 
 	// Set up signal handling for graceful shutdown
 	done := make(chan os.Signal, 1)
