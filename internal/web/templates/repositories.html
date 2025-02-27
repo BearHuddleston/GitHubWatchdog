@@ -1,0 +1,56 @@
+{{define "content"}}
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Repository</th>
+            <th>Owner</th>
+            <th>Updated</th>
+            <th>Size (KB)</th>
+            <th>Stars</th>
+            <th>Status</th>
+            <th>Processed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Repositories}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td><a href="https://github.com/{{.Owner}}/{{.Name}}" target="_blank">{{.Name}}</a></td>
+            <td><a href="https://github.com/{{.Owner}}" target="_blank">{{.Owner}}</a></td>
+            <td class="timestamp">{{.UpdatedAt.Format "Jan 02, 2006"}}</td>
+            <td>{{.DiskUsage}}</td>
+            <td>{{.StargazerCount}}</td>
+            <td>{{if .IsMalicious}}<span class="malicious">MALICIOUS</span>{{else}}Clean{{end}}</td>
+            <td class="timestamp">{{.ProcessedAt.Format "Jan 02, 2006 15:04:05"}}</td>
+        </tr>
+        {{else}}
+        <tr>
+            <td colspan="8">No repositories found</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+
+{{if gt .TotalPages 1}}
+<div class="pagination">
+    {{if gt .Page 1}}
+    <a href="/repositories?page={{subtract .Page 1}}&limit={{.Limit}}">&laquo; Previous</a>
+    {{end}}
+    
+    {{range $i := seq 1 .TotalPages}}
+        {{if and (ge $i (subtract $.Page 2)) (le $i (add $.Page 2))}}
+            {{if eq $i $.Page}}
+            <a href="/repositories?page={{$i}}&limit={{$.Limit}}" class="active">{{$i}}</a>
+            {{else}}
+            <a href="/repositories?page={{$i}}&limit={{$.Limit}}">{{$i}}</a>
+            {{end}}
+        {{end}}
+    {{end}}
+    
+    {{if lt .Page .TotalPages}}
+    <a href="/repositories?page={{add .Page 1}}&limit={{.Limit}}">Next &raquo;</a>
+    {{end}}
+</div>
+{{end}}
+{{end}}

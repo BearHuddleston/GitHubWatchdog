@@ -1,0 +1,30 @@
+{{define "content"}}
+<div class="stats">
+    <div class="stat-card">
+        <div class="stat-number">{{.RepoCount}}</div>
+        <div class="stat-label">Total Repositories</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{.MaliciousCount}}</div>
+        <div class="stat-label">Malicious Repositories</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{.UserCount}}</div>
+        <div class="stat-label">Total Users</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{.SuspiciousCount}}</div>
+        <div class="stat-label">Suspicious Users</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{.FlagCount}}</div>
+        <div class="stat-label">Heuristic Flags</div>
+    </div>
+</div>
+
+<h3>Overview</h3>
+<p>
+    The GitHub Watchdog system monitors GitHub repositories and users for potentially malicious activity.
+    Use the navigation above to explore detailed reports on repositories, users, and triggered heuristic flags.
+</p>
+{{end}}

@@ -1,195 +1,171 @@
+// Package analyzer provides repository and user analysis functionality
 package analyzer
 
 import (
 	"context"
 	"fmt"
-	"log"
-	"strings"
 	"sync"
-	"time"
 
-	"github.com/shurcooL/githubv4"
-	"githubwatchdog.bearhuddleston/internal/db"
+	"github.com/arkouda/github/GitHubWatchdog/internal/github"
+	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
+	"github.com/arkouda/github/GitHubWatchdog/internal/models"
 )
 
-// AnalysisResult holds aggregated metrics for a GitHub user.
-type AnalysisResult struct {
-	Suspicious           bool
-	TotalStars           int
-	EmptyCount           int
-	SuspiciousEmptyCount int
-	Contributions        int
-	HeuristicResults     []HeuristicResult
+// ResultHolder holds an analysis result and a channel to signal completion
+type ResultHolder struct {
+	Result models.AnalysisResult
+	Ready  chan struct{}
 }
 
-// Analyzer caches user analysis results to avoid duplicate processing.
+// Analyzer analyzes GitHub users and repositories for suspicious activity
 type Analyzer struct {
-	processedUsers sync.Map // key: username, value: AnalysisResult
-	userCache      sync.Map // key: username, value: AnalysisResult
+	client         *github.Client
+	userCache      sync.Map // map[string]models.AnalysisResult
+	processedUsers sync.Map // used for coordinating analysis, map[string]*ResultHolder
+	flaggedUsers   sync.Map // map[string]bool to record flag insertion
+	logger         *logger.Logger
 }
 
-// NewAnalyzer returns a new Analyzer instance.
-func NewAnalyzer() *Analyzer {
-	return &Analyzer{}
+// New creates a new analyzer
+func New(client *github.Client) *Analyzer {
+	return &Analyzer{
+		client:         client,
+		logger:         client.GetLogger(),
+	}
 }
 
-// userData holds fetched GitHub user details.
-type userData struct {
-	CreatedAt     time.Time
-	Contributions int
-	Repositories  []repoData
+// PreloadUsers preloads user data into the analyzer's cache
+func (a *Analyzer) PreloadUsers(users []string) {
+	for _, user := range users {
+		// Basic placeholder result
+		result := models.AnalysisResult{Suspicious: false}
+		holder := &ResultHolder{
+			Result: result,
+			Ready:  make(chan struct{}),
+		}
+		close(holder.Ready) // mark it as ready
+		a.processedUsers.Store(user, holder)
+		a.userCache.Store(user, result)
+	}
+	a.logger.Info("Preloaded %d users into cache", len(users))
 }
 
-// repoData holds minimal repository information.
-type repoData struct {
-	Name           string
-	DiskUsage      int
-	StargazerCount int
+// GetLogger returns the analyzer's logger
+func (a *Analyzer) GetLogger() *logger.Logger {
+	return a.logger
 }
 
-// AnalyzeUser coordinates fetching data and computing analysis metrics for a user.
-func (a *Analyzer) AnalyzeUser(ctx context.Context, client *githubv4.Client, username string) (AnalysisResult, error) {
-	// Return from cache if available.
+// AnalyzeUser analyzes a GitHub user for suspicious activity
+func (a *Analyzer) AnalyzeUser(ctx context.Context, username string) (models.AnalysisResult, error) {
+	// Check cache first
 	if val, ok := a.userCache.Load(username); ok {
-		result := val.(AnalysisResult)
-		log.Printf("Cache hit for user %s: %+v", username, result)
-		return result, nil
-	}
-	if val, processed := a.processedUsers.Load(username); processed {
-		result := val.(AnalysisResult)
-		log.Printf("User %s already processed: %+v", username, result)
+		result := val.(models.AnalysisResult)
+		a.logger.Debug("Cache hit for user %s: %+v", username, result)
 		return result, nil
 	}
 
-	// Fetch user data from GitHub.
-	data, err := a.fetchUserData(ctx, client, username)
+	// Use a resultHolder to coordinate concurrent calls
+	holderInterface, loaded := a.processedUsers.LoadOrStore(username, &ResultHolder{
+		Ready: make(chan struct{}),
+	})
+	holder := holderInterface.(*ResultHolder)
+
+	if loaded {
+		// Another goroutine is processing the user. Wait until it's done
+		<-holder.Ready
+		a.logger.Debug("User %s already being processed; returning cached result.", username)
+		return holder.Result, nil
+	}
+
+	// This goroutine is responsible for computing the analysis
+	a.logger.Debug("Starting analysis for user %s", username)
+	data, err := a.fetchUserData(ctx, username)
 	if err != nil {
-		return AnalysisResult{}, err
+		close(holder.Ready) // signal waiting goroutines even on error
+		return models.AnalysisResult{}, fmt.Errorf("fetching user data: %w", err)
 	}
-
-	// If the user has no repositories, return an empty analysis.
+	
 	if len(data.Repositories) == 0 {
-		log.Printf("User %s has no repositories.", username)
-		result := AnalysisResult{Suspicious: false}
-		a.userCache.Store(username, result)
-		a.processedUsers.Store(username, result)
-		return result, nil
+		a.logger.Debug("User %s has no repositories.", username)
+		holder.Result = models.AnalysisResult{Suspicious: false}
+		close(holder.Ready)
+		a.userCache.Store(username, holder.Result)
+		return holder.Result, nil
 	}
 
-	// Run heuristics via the interface.
-	heuristicResults, overallSuspicious := EvaluateUserHeuristics(data, data.Repositories)
+	// Analyze the user's repositories
+	repos := data.Repositories
+	totalStars, emptyCount, suspiciousEmptyCount := computeRepoMetrics(repos)
+	heuristicResults, overallSuspicious := EvaluateUserHeuristics(data, repos)
 
-	// Log individual heuristic results.
-	for _, hr := range heuristicResults {
-		log.Printf("Heuristic %s for user %s: Flag=%v, Description=%s", hr.Name, username, hr.Flag, hr.Description)
-	}
-
-	analysisResult := AnalysisResult{
+	analysisResult := models.AnalysisResult{
 		Suspicious:           overallSuspicious,
-		TotalStars:           func() int { ts, _, _ := computeRepoMetrics(data.Repositories); return ts }(),
-		EmptyCount:           func() int { _, ec, _ := computeRepoMetrics(data.Repositories); return ec }(),
-		SuspiciousEmptyCount: func() int { _, _, sec := computeRepoMetrics(data.Repositories); return sec }(),
+		TotalStars:           totalStars,
+		EmptyCount:           emptyCount,
+		SuspiciousEmptyCount: suspiciousEmptyCount,
 		Contributions:        data.Contributions,
 		HeuristicResults:     heuristicResults,
 	}
 
-	// Cache and record the result.
+	// Store the result and signal completion
+	holder.Result = analysisResult
+	close(holder.Ready)
 	a.userCache.Store(username, analysisResult)
-	a.processedUsers.Store(username, analysisResult)
-
-	if overallSuspicious {
-		log.Printf("User %s flagged as suspicious via heuristics.", username)
-	}
-
+	a.logger.Debug("User %s processed: %+v", username, analysisResult)
 	return analysisResult, nil
 }
 
-// fetchUserData retrieves the user's creation date, contributions, and repository list.
-func (a *Analyzer) fetchUserData(ctx context.Context, client *githubv4.Client, username string) (userData, error) {
-	var data userData
-	oneYearAgo := time.Now().Add(-365 * 24 * time.Hour)
-	now := time.Now()
-	perPage := 100
+// fetchUserData fetches user data from GitHub
+func (a *Analyzer) fetchUserData(ctx context.Context, username string) (models.UserData, error) {
+	var data models.UserData
 
-	var repos []repoData
-	var cursor *githubv4.String
-	var contributions int
-	firstCall := true
+	// Fetch user creation date
+	createdAt, err := a.client.GetUserInfo(ctx, username)
+	if err != nil {
+		return data, err
+	}
+	data.CreatedAt = createdAt
 
-	// GraphQL query definition.
-	var q struct {
-		User struct {
-			CreatedAt               githubv4.DateTime
-			ContributionsCollection struct {
-				TotalCommitContributions            int
-				TotalIssueContributions             int
-				TotalPullRequestContributions       int
-				TotalPullRequestReviewContributions int
-			} `graphql:"contributionsCollection(from: $from, to: $to)"`
-			Repositories struct {
-				PageInfo struct {
-					HasNextPage bool
-					EndCursor   githubv4.String
-				}
-				Nodes []struct {
-					Name           githubv4.String
-					DiskUsage      int
-					StargazerCount int
-				}
-			} `graphql:"repositories(first: $perPage, ownerAffiliations: OWNER, after: $cursor)"`
-		} `graphql:"user(login: $login)"`
+	// Fetch user repositories
+	repos, err := a.client.GetUserRepositories(ctx, username)
+	if err != nil {
+		return data, err
 	}
 
-	// Loop to paginate through repositories.
-	for {
-		variables := map[string]interface{}{
-			"login":   githubv4.String(username),
-			"perPage": githubv4.Int(perPage),
-			"cursor":  cursor,
-		}
-		// On the first call, include the contributions date range.
-		if firstCall {
-			variables["from"] = githubv4.DateTime{Time: oneYearAgo}
-			variables["to"] = githubv4.DateTime{Time: now}
-		}
-
-		if err := client.Query(ctx, &q, variables); err != nil {
-			log.Printf("Error fetching data for user %s: %v", username, err)
-			return data, err
-		}
-
-		if firstCall {
-			contributions = q.User.ContributionsCollection.TotalCommitContributions +
-				q.User.ContributionsCollection.TotalIssueContributions +
-				q.User.ContributionsCollection.TotalPullRequestContributions +
-				q.User.ContributionsCollection.TotalPullRequestReviewContributions
-			firstCall = false
-		}
-
-		// Append fetched repository data.
-		for _, node := range q.User.Repositories.Nodes {
-			repos = append(repos, repoData{
-				Name:           string(node.Name),
-				DiskUsage:      node.DiskUsage,
-				StargazerCount: node.StargazerCount,
-			})
-		}
-
-		if !q.User.Repositories.PageInfo.HasNextPage {
-			break
-		}
-		cursor = &q.User.Repositories.PageInfo.EndCursor
+	// Convert to internal repository data format
+	var repoDataList []models.RepoData
+	for _, r := range repos {
+		repoDataList = append(repoDataList, models.RepoData{
+			Name:           r.Name,
+			DiskUsage:      r.DiskUsage,
+			StargazerCount: r.StargazerCount,
+		})
 	}
+	data.Repositories = repoDataList
 
-	data.CreatedAt = q.User.CreatedAt.Time
+	// Fetch user contributions
+	contributions, err := a.client.GetUserContributions(ctx, username)
+	if err != nil {
+		return data, err
+	}
 	data.Contributions = contributions
-	data.Repositories = repos
+
 	return data, nil
 }
 
-// computeRepoMetrics calculates total stars, number of empty repositories,
-// and counts empty repositories with at least 5 stars (suspicious repos).
-func computeRepoMetrics(repos []repoData) (totalStars, emptyCount, suspiciousEmptyCount int) {
+// IsUserFlagged checks if a user has been flagged
+func (a *Analyzer) IsUserFlagged(username string) bool {
+	_, flagged := a.flaggedUsers.Load(username)
+	return flagged
+}
+
+// MarkUserFlagged marks a user as flagged
+func (a *Analyzer) MarkUserFlagged(username string) {
+	a.flaggedUsers.Store(username, true)
+}
+
+// computeRepoMetrics computes metrics for repositories
+func computeRepoMetrics(repos []models.RepoData) (totalStars, emptyCount, suspiciousEmptyCount int) {
 	const emptyThreshold = 10
 	for _, repo := range repos {
 		totalStars += repo.StargazerCount
@@ -203,88 +179,68 @@ func computeRepoMetrics(repos []repoData) (totalStars, emptyCount, suspiciousEmp
 	return
 }
 
-// Repo represents a GitHub repository with selected fields.
-type Repo struct {
-	Owner          string
-	Name           string
-	UpdatedAt      time.Time
-	DiskUsage      int
-	StargazerCount int
+// EvaluateUserHeuristics evaluates user data against all heuristics
+func EvaluateUserHeuristics(data models.UserData, repos []models.RepoData) ([]models.HeuristicResult, bool) {
+	heuristics := []UserHeuristic{&OriginalHeuristic{}, &NewHeuristic{}, &RecentHeuristic{}}
+	var suspicious bool
+	var results []models.HeuristicResult
+	
+	for _, h := range heuristics {
+		result := h.Evaluate(data, repos)
+		if result.Flag {
+			suspicious = true
+		}
+		results = append(results, result)
+	}
+	
+	return results, suspicious
 }
 
-// AnalyzeRepo checks a repository’s README for malware markers and, if found,
-// processes stargazer data to record heuristic flags.
-func AnalyzeRepo(ctx context.Context, client *githubv4.Client, database *db.Database, owner, repoName string) (bool, error) {
-	// Query the repository's README.
-	var q struct {
-		Repository struct {
-			Readme *struct {
-				Blob struct {
-					Text string
-				} `graphql:"... on Blob"`
-			} `graphql:"readme: object(expression: \"HEAD:README.md\")"`
-		} `graphql:"repository(owner: $owner, name: $name)"`
+// IsRepoMalicious checks if a repository is malicious
+func (a *Analyzer) IsRepoMalicious(ctx context.Context, repo models.RepoData) (bool, error) {
+	checkers := []RepoChecker{
+		&ReadmeChecker{},
+		&LoaderChecker{Client: a.client},
 	}
-	variables := map[string]interface{}{
-		"owner": githubv4.String(owner),
-		"name":  githubv4.String(repoName),
+	
+	for _, checker := range checkers {
+		malicious, err := checker.Check(ctx, repo)
+		if err != nil {
+			return false, err
+		}
+		if malicious {
+			return true, nil
+		}
 	}
-	if err := client.Query(ctx, &q, variables); err != nil {
-		return false, fmt.Errorf("fetching README for %s/%s: %w", owner, repoName, err)
-	}
+	
+	return false, nil
+}
 
-	// If no README exists, skip further analysis.
-	if q.Repository.Readme == nil {
-		log.Printf("Repository %s/%s missing README.md – skipping.", owner, repoName)
-		return false, nil
+// CheckRepoFiles checks a repository's files for malicious content
+func (a *Analyzer) CheckRepoFiles(ctx context.Context, owner, name, defaultBranch string) (models.RepoData, bool, error) {
+	var repo models.RepoData
+	repo.Owner = owner
+	repo.Name = name
+	
+	// Get README
+	readme, err := a.client.GetRepoReadme(ctx, owner, name)
+	if err != nil {
+		a.logger.Debug("Error fetching readme for %s/%s: %v", owner, name, err)
 	}
-	content := q.Repository.Readme.Blob.Text
-
-	// Only flag the repository if both malware markers are present.
-	if !(strings.Contains(content, "# [DOWNLOAD LINK]") && strings.Contains(content, "# PASSWORD : 2025")) {
-		return false, nil
+	repo.Readme = readme
+	
+	// Get tree entries
+	entries, err := a.client.GetRepoTree(ctx, owner, name, defaultBranch)
+	if err != nil {
+		a.logger.Debug("Error fetching tree for %s/%s: %v", owner, name, err)
 	}
-	log.Printf("Repository %s/%s identified as malicious.", owner, repoName)
-
-	// Process stargazers to flag malicious interest.
-	// var sgQuery struct {
-	// 	Repository struct {
-	// 		Stargazers struct {
-	// 			PageInfo struct {
-	// 				HasNextPage bool
-	// 				EndCursor   githubv4.String
-	// 			}
-	// 			Nodes []struct {
-	// 				Login githubv4.String
-	// 			}
-	// 		} `graphql:"stargazers(first: $perPage, after: $after)"`
-	// 	} `graphql:"repository(owner: $owner, name: $name)"`
-	// }
-	// perPage := 100
-	// var cursor *githubv4.String
-	// for {
-	// 	vars := map[string]interface{}{
-	// 		"owner":   githubv4.String(owner),
-	// 		"name":    githubv4.String(repoName),
-	// 		"perPage": githubv4.Int(perPage),
-	// 		"after":   cursor,
-	// 	}
-	// 	if err := client.Query(ctx, &sgQuery, vars); err != nil {
-	// 		log.Printf("Error fetching stargazers for %s/%s: %v", owner, repoName, err)
-	// 		break
-	// 	}
-	// 	for _, user := range sgQuery.Repository.Stargazers.Nodes {
-	// 		login := string(user.Login)
-	// 		flagDescription := fmt.Sprintf("Malicious stargazer detected in repository %s/%s", owner, repoName)
-	// 		if err := database.InsertHeuristicFlag("stargazer", login, flagDescription); err != nil {
-	// 			log.Printf("Error inserting flag for stargazer %s: %v", login, err)
-	// 		}
-	// 	}
-	// 	if !sgQuery.Repository.Stargazers.PageInfo.HasNextPage {
-	// 		break
-	// 	}
-	// 	cursor = &sgQuery.Repository.Stargazers.PageInfo.EndCursor
-	// }
-
-	return true, nil
+	repo.TreeEntries = entries
+	
+	// Check if repository is malicious
+	isMalicious, err := a.IsRepoMalicious(ctx, repo)
+	if err != nil {
+		return repo, false, err
+	}
+	
+	return repo, isMalicious, nil
 }

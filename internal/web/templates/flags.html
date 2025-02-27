@@ -1,0 +1,56 @@
+{{define "content"}}
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Type</th>
+            <th>Entity</th>
+            <th>Flag</th>
+            <th>Triggered</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{range .Flags}}
+        <tr>
+            <td>{{.ID}}</td>
+            <td>{{.EntityType}}</td>
+            <td>
+                {{if eq .EntityType "repo"}}
+                <a href="https://github.com/{{.EntityID}}" target="_blank">{{.EntityID}}</a>
+                {{else}}
+                <a href="https://github.com/{{.EntityID}}" target="_blank">{{.EntityID}}</a>
+                {{end}}
+            </td>
+            <td>{{.Flag}}</td>
+            <td class="timestamp">{{.TriggeredAt.Format "Jan 02, 2006 15:04:05"}}</td>
+        </tr>
+        {{else}}
+        <tr>
+            <td colspan="5">No flags found</td>
+        </tr>
+        {{end}}
+    </tbody>
+</table>
+
+{{if gt .TotalPages 1}}
+<div class="pagination">
+    {{if gt .Page 1}}
+    <a href="/flags?page={{subtract .Page 1}}&limit={{.Limit}}">&laquo; Previous</a>
+    {{end}}
+    
+    {{range $i := seq 1 .TotalPages}}
+        {{if and (ge $i (subtract $.Page 2)) (le $i (add $.Page 2))}}
+            {{if eq $i $.Page}}
+            <a href="/flags?page={{$i}}&limit={{$.Limit}}" class="active">{{$i}}</a>
+            {{else}}
+            <a href="/flags?page={{$i}}&limit={{$.Limit}}">{{$i}}</a>
+            {{end}}
+        {{end}}
+    {{end}}
+    
+    {{if lt .Page .TotalPages}}
+    <a href="/flags?page={{add .Page 1}}&limit={{.Limit}}">Next &raquo;</a>
+    {{end}}
+</div>
+{{end}}
+{{end}}

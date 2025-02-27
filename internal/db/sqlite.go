@@ -1,125 +1,197 @@
+// Package db provides database operations for the application
 package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mattn/go-sqlite3" // required SQLite driver
 )
 
-// Database wraps a sql.DB connection.
+// Database wraps an sql.DB and prepared statements.
 type Database struct {
-	*sql.DB
+	db             *sql.DB
+	insertRepoStmt *sql.Stmt
+	insertUserStmt *sql.Stmt
+	insertFlagStmt *sql.Stmt
 }
 
-// NewDatabase opens (or creates) the SQLite database and creates necessary tables.
-func NewDatabase(dbPath string) (*Database, error) {
+// QueryRow executes a query that is expected to return at most one row.
+// QueryRow always returns a non-nil value. Errors are deferred until
+// Row's Scan method is called.
+func (d *Database) QueryRow(query string, args ...interface{}) *sql.Row {
+	return d.db.QueryRow(query, args...)
+}
+
+// Query executes a query that returns rows, typically a SELECT.
+func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return d.db.Query(query, args...)
+}
+
+// New creates a new database connection and initializes tables
+func New(dbPath string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	database := &Database{db}
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(0)
+
+	database := &Database{db: db}
 	if err := database.createTables(); err != nil {
-		return nil, err
+		db.Close()
+		return nil, fmt.Errorf("creating tables: %w", err)
+	}
+	if err := database.prepareStatements(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("preparing statements: %w", err)
 	}
 	return database, nil
 }
 
+// Close closes all database resources
+func (d *Database) Close() error {
+	var closeErr error
+	if d.insertRepoStmt != nil {
+		if err := d.insertRepoStmt.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("closing insertRepoStmt: %w", err))
+		}
+	}
+	if d.insertUserStmt != nil {
+		if err := d.insertUserStmt.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("closing insertUserStmt: %w", err))
+		}
+	}
+	if d.insertFlagStmt != nil {
+		if err := d.insertFlagStmt.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("closing insertFlagStmt: %w", err))
+		}
+	}
+	if d.db != nil {
+		if err := d.db.Close(); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("closing database: %w", err))
+		}
+	}
+	return closeErr
+}
+
 func (d *Database) createTables() error {
-	// Table for processed repositories.
 	repoTable := `
-    CREATE TABLE IF NOT EXISTS processed_repositories (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        repo_id TEXT UNIQUE,
-        owner TEXT,
-        name TEXT,
-        updated_at TIMESTAMP,
-        disk_usage INTEGER,
-        stargazer_count INTEGER,
-        is_malicious BOOLEAN,
-        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );`
-	if _, err := d.Exec(repoTable); err != nil {
+	CREATE TABLE IF NOT EXISTS processed_repositories (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		repo_id TEXT UNIQUE,
+		owner TEXT,
+		name TEXT,
+		updated_at TIMESTAMP,
+		disk_usage INTEGER,
+		stargazer_count INTEGER,
+		is_malicious BOOLEAN,
+		processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := d.db.Exec(repoTable); err != nil {
 		return fmt.Errorf("creating processed_repositories table: %w", err)
 	}
-
-	// Table for processed users.
 	userTable := `
-    CREATE TABLE IF NOT EXISTS processed_users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        created_at TIMESTAMP,
-        total_stars INTEGER,
-        empty_count INTEGER,
-        suspicious_empty_count INTEGER,
-        contributions INTEGER,
-        analysis_result BOOLEAN,
-        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );`
-	if _, err := d.Exec(userTable); err != nil {
+	CREATE TABLE IF NOT EXISTS processed_users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE,
+		created_at TIMESTAMP,
+		total_stars INTEGER,
+		empty_count INTEGER,
+		suspicious_empty_count INTEGER,
+		contributions INTEGER,
+		analysis_result BOOLEAN,
+		processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := d.db.Exec(userTable); err != nil {
 		return fmt.Errorf("creating processed_users table: %w", err)
 	}
-
-	// Table for heuristic flags.
 	flagTable := `
-    CREATE TABLE IF NOT EXISTS heuristic_flags (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        entity_type TEXT,
-        entity_id TEXT,
-        flag TEXT,
-        triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );`
-	if _, err := d.Exec(flagTable); err != nil {
+	CREATE TABLE IF NOT EXISTS heuristic_flags (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		entity_type TEXT,
+		entity_id TEXT,
+		flag TEXT,
+		triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err := d.db.Exec(flagTable); err != nil {
 		return fmt.Errorf("creating heuristic_flags table: %w", err)
 	}
 	return nil
 }
 
-// InsertProcessedRepo records a repository in the database.
+func (d *Database) prepareStatements() error {
+	var err error
+	d.insertRepoStmt, err = d.db.Prepare(`
+		INSERT OR IGNORE INTO processed_repositories 
+			(repo_id, owner, name, updated_at, disk_usage, stargazer_count, is_malicious)
+		VALUES (?, ?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing insertRepoStmt: %w", err)
+	}
+	d.insertUserStmt, err = d.db.Prepare(`
+		INSERT OR IGNORE INTO processed_users 
+			(username, created_at, total_stars, empty_count, suspicious_empty_count, contributions, analysis_result)
+		VALUES (?, ?, ?, ?, ?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing insertUserStmt: %w", err)
+	}
+	d.insertFlagStmt, err = d.db.Prepare(`
+		INSERT INTO heuristic_flags (entity_type, entity_id, flag)
+		VALUES (?, ?, ?);
+	`)
+	if err != nil {
+		return fmt.Errorf("preparing insertFlagStmt: %w", err)
+	}
+	return nil
+}
+
+// InsertProcessedRepo inserts a processed repository record
 func (d *Database) InsertProcessedRepo(repoID, owner, name string, updatedAt time.Time, diskUsage, stargazerCount int, isMalicious bool) error {
-	query := `
-    INSERT OR IGNORE INTO processed_repositories 
-        (repo_id, owner, name, updated_at, disk_usage, stargazer_count, is_malicious)
-    VALUES (?, ?, ?, ?, ?, ?, ?);`
-	_, err := d.Exec(query, repoID, owner, name, updatedAt, diskUsage, stargazerCount, isMalicious)
-	return err
+	_, err := d.insertRepoStmt.Exec(repoID, owner, name, updatedAt, diskUsage, stargazerCount, isMalicious)
+	if err != nil {
+		return fmt.Errorf("inserting processed repository: %w", err)
+	}
+	return nil
 }
 
-// InsertProcessedUser records a user along with the overall suspicious analysis result.
+// InsertProcessedUser inserts a processed user record
 func (d *Database) InsertProcessedUser(username string, createdAt time.Time, totalStars, emptyCount, suspiciousEmptyCount, contributions int, analysisResult bool) error {
-	query := `
-    INSERT OR IGNORE INTO processed_users 
-        (username, created_at, total_stars, empty_count, suspicious_empty_count, contributions, analysis_result)
-    VALUES (?, ?, ?, ?, ?, ?, ?);`
-	_, err := d.Exec(query, username, createdAt, totalStars, emptyCount, suspiciousEmptyCount, contributions, analysisResult)
-	return err
+	_, err := d.insertUserStmt.Exec(username, createdAt, totalStars, emptyCount, suspiciousEmptyCount, contributions, analysisResult)
+	if err != nil {
+		return fmt.Errorf("inserting processed user: %w", err)
+	}
+	return nil
 }
 
-// InsertHeuristicFlag logs a heuristic flag event.
+// InsertHeuristicFlag inserts a heuristic flag record
 func (d *Database) InsertHeuristicFlag(entityType, entityID, flag string) error {
-	query := `
-    INSERT INTO heuristic_flags (entity_type, entity_id, flag)
-    VALUES (?, ?, ?);`
-	_, err := d.Exec(query, entityType, entityID, flag)
-	return err
+	_, err := d.insertFlagStmt.Exec(entityType, entityID, flag)
+	if err != nil {
+		return fmt.Errorf("inserting heuristic flag: %w", err)
+	}
+	return nil
 }
 
-func (d *Database) GetProcessedUsers() (map[string]bool, error) {
-	query := `SELECT username FROM processed_users;`
-	rows, err := d.Query(query)
+// GetProcessedUsers returns a list of all processed usernames
+func (d *Database) GetProcessedUsers() ([]string, error) {
+	rows, err := d.db.Query(`SELECT username FROM processed_users;`)
 	if err != nil {
 		return nil, fmt.Errorf("querying processed users: %w", err)
 	}
 	defer rows.Close()
-
-	processed := make(map[string]bool)
+	var processed []string
 	for rows.Next() {
 		var username string
 		if err := rows.Scan(&username); err != nil {
 			return nil, fmt.Errorf("scanning username: %w", err)
 		}
-		processed[username] = true
+		processed = append(processed, username)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating processed users: %w", err)
@@ -127,17 +199,15 @@ func (d *Database) GetProcessedUsers() (map[string]bool, error) {
 	return processed, nil
 }
 
-// WasRepoProcessed checks if a repository was already processed and
-// if its stored updated_at timestamp is as recent as the given updatedAt.
+// WasRepoProcessed checks if a repository has already been processed
 func (d *Database) WasRepoProcessed(repoID string, updatedAt time.Time) (bool, error) {
 	var storedUpdatedAt time.Time
-	err := d.QueryRow("SELECT updated_at FROM processed_repositories WHERE repo_id = ?", repoID).Scan(&storedUpdatedAt)
-	if err == sql.ErrNoRows {
-		// Repository not processed.
-		return false, nil
-	} else if err != nil {
-		return false, err
+	err := d.db.QueryRow("SELECT updated_at FROM processed_repositories WHERE repo_id = ?", repoID).Scan(&storedUpdatedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("querying processed repository: %w", err)
 	}
-	// If our repo's updatedAt is not later than the stored one, it's already up to date.
 	return !updatedAt.After(storedUpdatedAt), nil
 }

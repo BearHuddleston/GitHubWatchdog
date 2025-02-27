@@ -4,40 +4,6 @@ GitHubWatchdog is a Go-based microservice that leverages the GitHub API to searc
 
 I have personally reported **over 3000+ accounts** using this tool.
 
-## Malicious Repositories
-
-All has been reported and has be dealt with.
-
-| id  | repo_id                                                                         | owner               | name                                                          | updated_at                | disk_usage | stargazer_count | is_malicious | processed_at        |
-| --- | ------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------- | ------------------------- | ---------- | --------------- | ------------ | ------------------- |
-| 34  | VastSupp/Ex1tlag-Free-2024                                                      | VastSupp            | Ex1tlag-Free-2024                                             | 2025-02-17 22:15:31+00:00 | 93         | 65              | 1            | 2025-02-18 20:01:46 |
-| 36  | TavsancikArthur/FL-Studio                                                       | TavsancikArthur     | FL-Studio                                                     | 2025-02-17 22:15:31+00:00 | 92         | 65              | 1            | 2025-02-18 20:01:46 |
-| 38  | TwistedTheIETDriver/Dayz-Cheat-H4ck-A1mbot                                      | TwistedTheIETDriver | Dayz-Cheat-H4ck-A1mbot                                        | 2025-02-17 22:15:31+00:00 | 46         | 65              | 1            | 2025-02-18 20:01:46 |
-| 39  | DiegoX12T/League-0f-Legends-h4ck                                                | DiegoX12T           | League-0f-Legends-h4ck                                        | 2025-02-17 22:15:31+00:00 | 93         | 64              | 1            | 2025-02-18 20:01:46 |
-| 40  | 15-038-Stevanus/Roblox-Blox-Fruits-Script-2024                                  | 15-038-Stevanus     | Roblox-Blox-Fruits-Script-2024                                | 2025-02-17 22:15:32+00:00 | 103        | 63              | 1            | 2025-02-18 20:01:46 |
-| 41  | CoolRocksyer120/N1tr0Dreams-2024                                                | CoolRocksyer120     | N1tr0Dreams-2024                                              | 2025-02-17 22:15:31+00:00 | 91         | 64              | 1            | 2025-02-18 20:01:46 |
-| 42  | janek1343/Nexus-Rob1ox                                                          | janek1343           | Nexus-Rob1ox                                                  | 2025-02-17 22:15:32+00:00 | 27         | 63              | 1            | 2025-02-18 20:01:46 |
-| 43  | twistedscripting/Rainbow-S1x-Siege-Cheat                                        | twistedscripting    | Rainbow-S1x-Siege-Cheat                                       | 2025-02-17 22:15:31+00:00 | 50         | 63              | 1            | 2025-02-18 20:01:46 |
-| 44  | hi654321/Spotify-Premium-for-free-2024                                          | hi654321            | Spotify-Premium-for-free-2024                                 | 2025-02-17 22:15:32+00:00 | 26         | 62              | 1            | 2025-02-18 20:01:46 |
-| 45  | Yusufid056/rust-hack-fre3                                                       | Yusufid056          | rust-hack-fre3                                                | 2025-02-17 22:15:32+00:00 | 97         | 62              | 1            | 2025-02-18 20:01:46 |
-| 47  | reudyp2006/SonyVegas-2024                                                       | reudyp2006          | SonyVegas-2024                                                | 2025-02-17 22:15:32+00:00 | 46         | 62              | 1            | 2025-02-18 20:01:46 |
-| 48  | SBlennytoxicgod/r0b10x-synapse-x-free                                           | SBlennytoxicgod     | r0b10x-synapse-x-free                                         | 2025-02-17 22:15:32+00:00 | 84         | 62              | 1            | 2025-02-18 20:01:46 |
-| 56  | tarosgrippen-1992/ReiBoot-Pro-11.1.1-Crack-With-Registration-Code-Download-2025 | tarosgrippen-1992   | ReiBoot-Pro-11.1.1-Crack-With-Registration-Code-Download-2025 | 2025-02-17 03:52:20+00:00 | 2          | 41              | 1            | 2025-02-18 20:01:47 |
-| 63  | knightannymars0/Codex-Roblox                                                    | knightannymars0     | Codex-Roblox                                                  | 2025-02-18 17:40:13+00:00 | 2          | 39              | 1            | 2025-02-18 20:01:47 |
-| 64  | bafymronterry8/JJsploit                                                         | bafymronterry8      | JJsploit                                                      | 2025-02-18 16:49:36+00:00 | 3          | 39              | 1            | 2025-02-18 20:01:47 |
-| 65  | hotpantsbronze5/Evon-Executor                                                   | hotpantsbronze5     | Evon-Executor                                                 | 2025-02-18 16:49:36+00:00 | 2          | 39              | 1            | 2025-02-18 20:01:47 |
-| 69  | tagal-nervok/FiveM-External-Cheat                                               | tagal-nervok        | FiveM-External-Cheat                                          | 2025-02-17 04:13:28+00:00 | 3          | 36              | 1            | 2025-02-18 20:01:47 |
-| 71  | optimistvova146/Shrimp                                                          | optimistvova146     | Shrimp                                                        | 2025-02-18 17:23:53+00:00 | 3          | 36              | 1            | 2025-02-18 20:01:47 |
-| 78  | griderempark1992/Blade                                                          | griderempark1992    | Blade                                                         | 2025-02-18 17:23:53+00:00 | 3          | 31              | 1            | 2025-02-18 20:01:48 |
-| 83  | wring4/Cubase-Pro-No-Crack                                                      | wring4              | Cubase-Pro-No-Crack                                           | 2025-02-17 04:17:22+00:00 | 2          | 29              | 1            | 2025-02-18 20:01:48 |
-| 197 | mowhampton83/autscript                                                          | mowhampton83        | autscript                                                     | 2025-02-18 17:23:52+00:00 | 3          | 15              | 1            | 2025-02-18 20:01:54 |
-| 216 | rondablackguard681/Blox-scr                                                     | rondablackguard681  | Blox-scr                                                      | 2025-02-18 17:23:52+00:00 | 3          | 14              | 1            | 2025-02-18 20:01:56 |
-| 224 | elthinshordekeep/Roblox-Incognito                                               | elthinshordekeep    | Roblox-Incognito                                              | 2025-02-18 16:55:06+00:00 | 2          | 12              | 1            | 2025-02-18 20:01:57 |
-| 243 | optimistvova146/Arceus-Executor                                                 | optimistvova146     | Arceus-Executor                                               | 2025-02-18 16:17:21+00:00 | 2          | 10              | 1            | 2025-02-18 20:01:58 |
-| 251 | bossannymars1992/BedWars                                                        | bossannymars1992    | BedWars                                                       | 2025-02-18 16:55:06+00:00 | 3          | 10              | 1            | 2025-02-18 20:01:58 |
-| 261 | simpotniikristmas2/Nexus-Roblox                                                 | simpotniikristmas2  | Nexus-Roblox                                                  | 2025-02-18 16:17:21+00:00 | 2          | 10              | 1            | 2025-02-18 20:01:58 |
-| 354 | chaz91madk/HorseLife                                                            | chaz91madk          | HorseLife                                                     | 2025-02-18 16:38:51+00:00 | 3          | 6               | 1            | 2025-02-18 20:02:05 |
-
 ## Architecture & Project Structure
 
 ```
@@ -45,18 +11,29 @@ GitHubWatchdog/
 ├── cmd/
 │   └── app/
 │       └── main.go           # Bootstraps the application, initializes dependencies, and starts the search loop.
-└── internal/
-    ├── analyzer/
-    │   ├── analyzer.go       # Contains user heuristics and analysis logic.
-    │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
-    ├── config/
-    │   └── config.go         # Reads environment variables and sets default configuration.
-    ├── db/
-    │   └── sqlite.go         # Implements SQLite-based storage for processed users and repositories.
-    ├── github/
-    │   └── client.go         # Sets up the GitHub GraphQL client.
-    └── processor/
-        └── processor.go      # Coordinates repository search, worker pool, and processing.
+├── internal/
+│   ├── analyzer/
+│   │   ├── analyzer.go       # Contains user heuristics and analysis logic.
+│   │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
+│   ├── config/
+│   │   └── config.go         # Reads environment variables and sets default configuration.
+│   ├── db/
+│   │   └── sqlite.go         # Implements SQLite-based storage for processed users and repositories.
+│   ├── github/
+│   │   ├── client.go         # Sets up the GitHub GraphQL client.
+│   │   ├── cache.go          # Implements caching for GitHub API requests.
+│   │   └── rate_limiter.go   # Handles GitHub API rate limiting.
+│   ├── logger/
+│   │   └── logger.go         # Provides logging functionality.
+│   ├── models/
+│   │   └── models.go         # Defines data structures used throughout the application.
+│   └── web/
+│       ├── server.go         # Implements HTTP server for web interface.
+│       ├── handlers.go       # HTTP request handlers for web interface.
+│       ├── data.go           # Database query functions for web interface.
+│       ├── template_funcs.go # Template functions for web interface.
+│       └── templates/        # HTML templates for web interface.
+└── bark/                     # Directory for storing malicious repo information.
 ```
 
 ## Overview
@@ -106,9 +83,33 @@ GitHubWatchdog performs the following tasks:
 
 Build and run the application from the project root:
 
+### Search Mode (Default)
+
 ```bash
 go build -o githubwatchdog ./cmd/app
-githubwatchdog
+./githubwatchdog
+```
+
+### Web Interface Mode
+
+To run the application with the web interface for viewing the database:
+
+```bash
+go build -o githubwatchdog ./cmd/app
+./githubwatchdog -web
+```
+
+The web server runs on port 8080 by default. You can access it at http://localhost:8080
+
+Options:
+
+-   `-web`: Run in web interface mode
+-   `-addr`: Specify the web server address (default: ":8080")
+
+Example with custom port:
+
+```bash
+./githubwatchdog -web -addr=":9090"
 ```
 
 ## TO-DO List
@@ -147,7 +148,8 @@ githubwatchdog
 
 ### Web UI Integration
 
--   Develop and integrate a web UI for real-time monitoring and management of the scanning process.
+-   ✅ Develop and integrate a web UI for viewing database content
+-   Enhance web UI with real-time monitoring and scanning process management
 
 ### CI/CD Integration
 

@@ -1,6 +1,10 @@
 {
     "max_pages": 10,
     "per_page": 100,
-    "github_query": "created:>2025-02-07 stars:>5",
-    "token": ""
+    "github_query": "created:>2025-02-23 stars:>5",
+    "max_concurrent": 10,
+    "rate_limit_buffer": 500,
+    "cache_ttl": 60,
+    "verbose": true,
+    "token": "your_github_token_here"
 }

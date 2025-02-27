@@ -1,47 +1,63 @@
+// Package config provides configuration management for the application
 package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 )
 
+// Config holds application configuration. Optional fields use pointers.
 type Config struct {
-	MaxPages      int    `json:"max_pages"`
-	PerPage       int    `json:"per_page"`
-	GitHubQuery   string `json:"github_query"`
-	Token         string `json:"token"`
-	MaxConcurrent int    `json:"max_concurrent"`
+	MaxPages        *int   `json:"max_pages"`
+	PerPage         *int   `json:"per_page"`
+	GitHubQuery     string `json:"github_query"` // mandatory
+	Token           string `json:"-"`            // loaded from env var
+	MaxConcurrent   *int   `json:"max_concurrent"`
+	RateLimitBuffer *int   `json:"rate_limit_buffer"` // minimum remaining rate limit before pausing
+	CacheTTL        *int   `json:"cache_ttl"`         // cache time-to-live in minutes
+	Verbose         *bool  `json:"verbose"`           // enable verbose logging
 }
 
-func New() (*Config, error) {
-	// Set default values
+// New loads configuration from config.json and env variables.
+func New(configPath string) (*Config, error) {
+	// defaults
+	maxPages := 10
+	perPage := 100
+	maxConcurrent := 10
+	rateLimitBuffer := 500
+	cacheTTL := 60 // 1 hour cache TTL
+	verbose := false
 	conf := Config{
-		MaxPages:      10,
-		PerPage:       100,                            // maximum per page
-		GitHubQuery:   "created:>2025-01-31 stars:>5", // base query
-		Token:         "",
-		MaxConcurrent: 10,
+		MaxPages:        &maxPages,
+		PerPage:         &perPage,
+		GitHubQuery:     "created:>2025-01-31 stars:>5",
+		MaxConcurrent:   &maxConcurrent,
+		RateLimitBuffer: &rateLimitBuffer,
+		CacheTTL:        &cacheTTL,
+		Verbose:         &verbose,
 	}
 
-	configFilePath := "config.json"
-	if _, err := os.Stat(configFilePath); err == nil {
-		data, err := os.ReadFile(configFilePath)
+	if _, err := os.Stat(configPath); err == nil {
+		data, err := os.ReadFile(configPath)
 		if err != nil {
-			return nil, fmt.Errorf("error reading config file: %w", err)
+			return nil, fmt.Errorf("reading config file: %w", err)
 		}
 		if err := json.Unmarshal(data, &conf); err != nil {
-			return nil, fmt.Errorf("error parsing config file: %w", err)
+			return nil, fmt.Errorf("parsing config file: %w", err)
 		}
 	}
 
-	// Override token with environment variable if available.
-	if tokenEnv := os.Getenv("GITHUB_TOKEN"); tokenEnv != "" {
-		conf.Token = tokenEnv
+	if conf.GitHubQuery == "" {
+		return nil, errors.New("github_query must be set in config.json")
 	}
 
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		conf.Token = token
+	}
 	if conf.Token == "" {
-		return nil, fmt.Errorf("please set the GITHUB_TOKEN environment variable or add it to the config file")
+		return nil, errors.New("please set the GITHUB_TOKEN environment variable")
 	}
 
 	return &conf, nil

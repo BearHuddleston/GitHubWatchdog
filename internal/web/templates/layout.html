@@ -1,0 +1,133 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - GitHub Watchdog</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        header {
+            border-bottom: 1px solid #eaeaea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+        }
+        h1 {
+            color: #24292e;
+        }
+        nav {
+            margin-bottom: 20px;
+        }
+        nav a {
+            margin-right: 15px;
+            text-decoration: none;
+            color: #0366d6;
+            font-weight: 500;
+        }
+        nav a:hover {
+            text-decoration: underline;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #eaeaea;
+        }
+        th {
+            background-color: #f6f8fa;
+            font-weight: 600;
+        }
+        tr:hover {
+            background-color: #f6f8fa;
+        }
+        .stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #f6f8fa;
+            border: 1px solid #eaeaea;
+            border-radius: 5px;
+            padding: 15px;
+            flex: 1;
+            min-width: 200px;
+        }
+        .stat-number {
+            font-size: 28px;
+            font-weight: bold;
+            color: #0366d6;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #586069;
+        }
+        .pagination {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 5px;
+        }
+        .pagination a {
+            padding: 8px 12px;
+            text-decoration: none;
+            border: 1px solid #eaeaea;
+            color: #0366d6;
+        }
+        .pagination a.active {
+            background-color: #0366d6;
+            color: white;
+        }
+        .pagination a:hover:not(.active) {
+            background-color: #f6f8fa;
+        }
+        .malicious {
+            color: #d73a49;
+            font-weight: bold;
+        }
+        .timestamp {
+            color: #586069;
+            font-size: 0.9em;
+        }
+        footer {
+            margin-top: 40px;
+            color: #586069;
+            font-size: 0.9em;
+            border-top: 1px solid #eaeaea;
+            padding-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>GitHub Watchdog</h1>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/repositories">Repositories</a>
+            <a href="/users">Users</a>
+            <a href="/flags">Heuristic Flags</a>
+        </nav>
+    </header>
+
+    <main>
+        <h2>{{.Title}}</h2>
+        {{template "content" .}}
+    </main>
+
+    <footer>
+        <p>GitHub Watchdog - Last updated: {{.LastUpdated.Format "Jan 02, 2006 15:04:05 MST"}}</p>
+    </footer>
+</body>
+</html>
+{{end}}
