@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -67,8 +68,7 @@ func (c *Client) SearchRepositories(ctx context.Context, query string, page, per
 		return nil, fmt.Errorf("search rate limit exceeded, please retry after reset time")
 	}
 
-	url := "https://api.github.com/search/repositories"
-	reqURL := fmt.Sprintf("%s?q=%s&page=%d&per_page=%d", url, query, page, perPage)
+	reqURL := fmt.Sprintf("https://api.github.com/search/repositories?q=%s&page=%d&per_page=%d", url.QueryEscape(query), page, perPage)
 	cacheKey := fmt.Sprintf("search:%s:%d:%d", query, page, perPage)
 
 	var responseBody []byte
