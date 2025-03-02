@@ -87,19 +87,58 @@ func main() {
 
 // runWebServer starts the web server
 func runWebServer(database *db.Database, addr string, appLogger *logger.Logger) {
-	// Get GitHub token from environment variable or config
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		// Try loading from config
-		cfg, err := config.New("config.json")
-		if err == nil && cfg.Token != "" {
-			token = cfg.Token
+	// Get configuration from environment variable or config file
+	cfg, err := config.New("config.json")
+	if err != nil {
+		// Try with environment variable only if loading from file failed
+		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+			// Create config manually
+			maxPages := 10
+			perPage := 100
+			maxConcurrent := 10
+			rateLimitBuffer := 500
+			cacheTTL := 60
+			verbose := true
+			ollamaEnabled := false
+			cfg = &config.Config{
+				MaxPages:        &maxPages,
+				PerPage:         &perPage,
+				GitHubQuery:     "created:>2025-02-23 stars:>5",
+				Token:           token,
+				MaxConcurrent:   &maxConcurrent,
+				RateLimitBuffer: &rateLimitBuffer,
+				CacheTTL:        &cacheTTL,
+				Verbose:         &verbose,
+				Ollama: &config.OllamaConfig{
+					Enabled:  &ollamaEnabled,
+					Endpoint: "http://localhost:11434",
+					Model:    "llama3.2",
+				},
+			}
 		} else {
 			appLogger.Fatal("GitHub token not found in environment variable or config")
 		}
 	}
 	
-	server := web.NewServer(database, addr, appLogger, token)
+	// Configure the web server
+	ollamaEndpoint := "http://localhost:11434"
+	ollamaModel := "llama3.2"
+	ollamaEnabled := false
+	
+	if cfg.Ollama != nil {
+		ollamaEnabled = *cfg.Ollama.Enabled
+		ollamaEndpoint = cfg.Ollama.Endpoint
+		ollamaModel = cfg.Ollama.Model
+	}
+	
+	serverConfig := &web.ServerConfig{
+		GitHubToken:    cfg.Token,
+		OllamaEnabled:  ollamaEnabled,
+		OllamaEndpoint: ollamaEndpoint,
+		OllamaModel:    ollamaModel,
+	}
+	
+	server := web.NewServer(database, addr, appLogger, serverConfig)
 
 	// Set up signal handling for graceful shutdown
 	done := make(chan os.Signal, 1)
