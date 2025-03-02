@@ -80,6 +80,11 @@ GitHubWatchdog performs the following tasks:
 
     Dependencies are managed via Go modules. Use `go mod tidy` to ensure all dependencies are fetched.
 
+-   **Optional: Ollama for AI-powered Threat Analysis:**
+    -   Install Ollama: https://ollama.ai/download
+    -   Run Ollama server locally: `ollama serve`
+    -   Pull the llama3.2 model: `ollama pull llama3.2`
+
 ## Running the Application
 
 Build and run the application from the project root:
@@ -113,6 +118,7 @@ The web interface includes the following features:
 -   **Status Toggle**: One-click toggle between clean/malicious or clean/suspicious states
 -   **Detailed Reports**: Real-time reports using GitHub API for repositories and users
 -   **Markdown Rendering**: Properly formatted README display in repository reports
+-   **Ollama Integration**: AI-powered threat analysis using Ollama LLM for enhanced security assessment
 
 Options:
 
@@ -126,6 +132,40 @@ Example with custom port:
 ```
 
 **Note**: A valid GitHub token is required for report functionality, which can be provided through the `GITHUB_TOKEN` environment variable or in the `config.json` file.
+
+## Ollama Integration
+
+GitHubWatchdog can be configured to use Ollama, a locally-run LLM server, to provide AI-powered threat analysis of repositories and users:
+
+1. **Configuration**: 
+   In your `config.json` file, add the following section:
+   ```json
+   "ollama": {
+       "enabled": true,
+       "endpoint": "http://localhost:11434",
+       "model": "llama3.2"
+   }
+   ```
+
+2. **Environment Variables**: 
+   Alternatively, set these environment variables:
+   ```bash
+   export OLLAMA_ENABLED=true
+   export OLLAMA_ENDPOINT=http://localhost:11434
+   export OLLAMA_MODEL=llama3.2
+   ```
+
+3. **Generate Analysis**:
+   Once configured, use the API endpoint to generate analyses:
+   ```
+   POST /api/analysis/generate
+   {
+     "entity_type": "repo",  // or "user"
+     "entity_id": "owner/repo"  // or "username"
+   }
+   ```
+
+The system will cache analyses in the database to avoid regenerating them for repeat requests. Analysis results are also included in repository and user report API responses.
 
 ## TO-DO List
 
@@ -169,6 +209,7 @@ Example with custom port:
 -   ✅ Add status toggle for repository and user classification
 -   ✅ Integrate detailed reports with GitHub API data
 -   ✅ Implement Markdown rendering for repository READMEs
+-   ✅ Add AI-powered threat analysis with Ollama integration
 -   Enhance web UI with real-time monitoring and scanning process management
 
 ### CI/CD Integration
