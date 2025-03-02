@@ -14,28 +14,35 @@ import (
 
 // ServerConfig holds the configuration for the web server
 type ServerConfig struct {
-	GitHubToken string
+	GitHubToken    string
+	OllamaEnabled  bool
+	OllamaEndpoint string
+	OllamaModel    string
 }
 
 // Server represents the HTTP server for the web interface
 type Server struct {
-	db      *db.Database
-	logger  *logger.Logger
-	server  *http.Server
-	addr    string
-	handler http.Handler
-	config  ServerConfig
+	db             *db.Database
+	logger         *logger.Logger
+	server         *http.Server
+	addr           string
+	handler        http.Handler
+	config         ServerConfig
+	ollamaEnabled  bool
+	ollamaEndpoint string
+	ollamaModel    string
 }
 
 // NewServer creates a new web server instance
-func NewServer(database *db.Database, addr string, logger *logger.Logger, githubToken string) *Server {
+func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *ServerConfig) *Server {
 	s := &Server{
-		db:     database,
-		logger: logger,
-		addr:   addr,
-		config: ServerConfig{
-			GitHubToken: githubToken,
-		},
+		db:             database,
+		logger:         logger,
+		addr:           addr,
+		config:         *conf,
+		ollamaEnabled:  conf.OllamaEnabled,
+		ollamaEndpoint: conf.OllamaEndpoint,
+		ollamaModel:    conf.OllamaModel,
 	}
 
 	// Set up templates directory
@@ -54,6 +61,7 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger, github
 	mux.HandleFunc("/api/user/status", s.updateUserStatusHandler)
 	mux.HandleFunc("/api/report/repository", s.repositoryReportHandler)
 	mux.HandleFunc("/api/report/user", s.userReportHandler)
+	mux.HandleFunc("/api/analysis/generate", s.generateOllamaAnalysisHandler)
 
 	s.handler = mux
 	s.server = &http.Server{
