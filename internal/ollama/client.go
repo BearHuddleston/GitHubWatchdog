@@ -93,40 +93,11 @@ func NewClient(baseURL string) *Client {
 
 // Generate sends a request to the Ollama API to generate a response
 func (c *Client) Generate(ctx context.Context, model, prompt string) (string, error) {
-	// Ensure we have a valid model and non-empty prompt
-	if model == "" {
-		model = "llama3.2" // Fallback to default model
-	}
-
 	if prompt == "" {
 		return "", fmt.Errorf("prompt cannot be empty")
 	}
 
-	// Add system prompt to request if needed
-	system := DefaultSystemPrompt
-	
-	// For debug only
-	_ = system
-
-	// Create a minimal raw request body that matches the curl example exactly
-	requestMap := map[string]interface{}{
-		"model": model,
-		"prompt": prompt,
-		"stream": false,
-		"options": map[string]interface{}{
-			"num_predict": 4096,
-			"temperature": 0.8,
-			"top_k": 20,
-			"top_p": 0.9,
-			"seed": 42,
-		},
-	}
-
-	// For testing/debugging
-	debugReq, _ := json.MarshalIndent(requestMap, "", "  ")
-	fmt.Printf("Sending request to Ollama: %s\n", debugReq)
-
-	reqBody, err := json.Marshal(requestMap)
+	reqBody, err := json.Marshal(buildGenerateRequest(model, prompt))
 	if err != nil {
 		return "", fmt.Errorf("marshaling request: %w", err)
 	}
@@ -159,9 +130,6 @@ func (c *Client) Generate(ctx context.Context, model, prompt string) (string, er
 		return "", fmt.Errorf("reading response body: %w", err)
 	}
 
-	// Log the raw response for debugging
-	fmt.Printf("Raw response from Ollama: %s\n", string(responseBody))
-
 	// Parse into generic map to avoid struct validation issues
 	var responseMap map[string]interface{}
 	if err := json.Unmarshal(responseBody, &responseMap); err != nil {
@@ -193,4 +161,24 @@ func (c *Client) Generate(ctx context.Context, model, prompt string) (string, er
 	}
 
 	return responseText, nil
+}
+
+func buildGenerateRequest(model, prompt string) GenerateRequest {
+	if model == "" {
+		model = "llama3.2"
+	}
+
+	return GenerateRequest{
+		Model:  model,
+		Prompt: prompt,
+		System: DefaultSystemPrompt,
+		Stream: false,
+		Options: Options{
+			NumPredict:  4096,
+			Temperature: 0.8,
+			TopK:        20,
+			TopP:        0.9,
+			Seed:        42,
+		},
+	}
 }

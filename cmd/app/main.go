@@ -30,31 +30,9 @@ func main() {
 	webAddr := flag.String("addr", "127.0.0.1:8080", "Address to run web server on")
 	flag.Parse()
 
-	// Load configuration
-	cfg, err := config.New("config.json")
+	cfg, err := loadConfig()
 	if err != nil {
-		// Try with environment variable only if loading from file failed
-		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-			// Create config manually
-			maxPages := 10
-			perPage := 100
-			maxConcurrent := 10
-			rateLimitBuffer := 500
-			cacheTTL := 60
-			verbose := true
-			cfg = &config.Config{
-				MaxPages:        &maxPages,
-				PerPage:         &perPage,
-				GitHubQuery:     "created:>2025-02-23 stars:>5",
-				Token:           token,
-				MaxConcurrent:   &maxConcurrent,
-				RateLimitBuffer: &rateLimitBuffer,
-				CacheTTL:        &cacheTTL,
-				Verbose:         &verbose,
-			}
-		} else {
-			log.Fatalf("Loading configuration: %v", err)
-		}
+		log.Fatalf("Loading configuration: %v", err)
 	}
 
 	// Initialize logger
@@ -78,48 +56,51 @@ func main() {
 
 	if *webMode {
 		// Run in web mode
-		runWebServer(database, *webAddr, appLogger)
+		runWebServer(database, cfg, *webAddr, appLogger)
 	} else {
 		// Run in search mode (original functionality)
 		runSearchMode(database, cfg, appLogger)
 	}
 }
 
-// runWebServer starts the web server
-func runWebServer(database *db.Database, addr string, appLogger *logger.Logger) {
-	// Get configuration from environment variable or config file
+func loadConfig() (*config.Config, error) {
 	cfg, err := config.New("config.json")
-	if err != nil {
-		// Try with environment variable only if loading from file failed
-		if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-			// Create config manually
-			maxPages := 10
-			perPage := 100
-			maxConcurrent := 10
-			rateLimitBuffer := 500
-			cacheTTL := 60
-			verbose := true
-			ollamaEnabled := false
-			cfg = &config.Config{
-				MaxPages:        &maxPages,
-				PerPage:         &perPage,
-				GitHubQuery:     "created:>2025-02-23 stars:>5",
-				Token:           token,
-				MaxConcurrent:   &maxConcurrent,
-				RateLimitBuffer: &rateLimitBuffer,
-				CacheTTL:        &cacheTTL,
-				Verbose:         &verbose,
-				Ollama: &config.OllamaConfig{
-					Enabled:  &ollamaEnabled,
-					Endpoint: "http://localhost:11434",
-					Model:    "llama3.2",
-				},
-			}
-		} else {
-			appLogger.Fatal("GitHub token not found in environment variable or config")
-		}
+	if err == nil {
+		return cfg, nil
 	}
 
+	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+		return nil, err
+	}
+
+	maxPages := 10
+	perPage := 100
+	maxConcurrent := 10
+	rateLimitBuffer := 500
+	cacheTTL := 60
+	verbose := true
+	ollamaEnabled := false
+
+	return &config.Config{
+		MaxPages:        &maxPages,
+		PerPage:         &perPage,
+		GitHubQuery:     "created:>2025-02-23 stars:>5",
+		Token:           token,
+		MaxConcurrent:   &maxConcurrent,
+		RateLimitBuffer: &rateLimitBuffer,
+		CacheTTL:        &cacheTTL,
+		Verbose:         &verbose,
+		Ollama: &config.OllamaConfig{
+			Enabled:  &ollamaEnabled,
+			Endpoint: "http://localhost:11434",
+			Model:    "llama3.2",
+		},
+	}, nil
+}
+
+// runWebServer starts the web server
+func runWebServer(database *db.Database, cfg *config.Config, addr string, appLogger *logger.Logger) {
 	// Configure the web server
 	ollamaEndpoint := "http://localhost:11434"
 	ollamaModel := "llama3.2"
