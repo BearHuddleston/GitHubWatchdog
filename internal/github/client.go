@@ -64,8 +64,8 @@ func (c *Client) SearchRepositories(ctx context.Context, query string, page, per
 	}
 
 	// Check rate limits, but don't hang if we can't proceed
-	if !c.rateLimiter.CheckSearchRateLimit() {
-		return nil, fmt.Errorf("search rate limit exceeded, please retry after reset time")
+	if err := c.rateLimiter.CheckSearchRateLimit(ctx); err != nil {
+		return nil, err
 	}
 
 	reqURL := fmt.Sprintf("https://api.github.com/search/repositories?q=%s&page=%d&per_page=%d", url.QueryEscape(query), page, perPage)
@@ -108,7 +108,9 @@ func (c *Client) SearchRepositories(ctx context.Context, query string, page, per
 				if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
 					if d, err := time.ParseDuration(retryAfter + "s"); err == nil {
 						c.logger.Info("Rate limited. Waiting %v seconds.", d)
-						time.Sleep(d)
+						if err := sleepWithContext(ctx, d); err != nil {
+							return nil, err
+						}
 						return c.SearchRepositories(ctx, query, page, perPage)
 					}
 				} else {
@@ -143,7 +145,9 @@ func (c *Client) SearchRepositories(ctx context.Context, query string, page, per
 
 // GetUserInfo fetches user info from GitHub
 func (c *Client) GetUserInfo(ctx context.Context, username string) (time.Time, error) {
-	c.rateLimiter.CheckCoreRateLimit()
+	if err := c.rateLimiter.CheckCoreRateLimit(ctx); err != nil {
+		return time.Time{}, err
+	}
 
 	url := fmt.Sprintf("https://api.github.com/users/%s", username)
 	cacheKey := fmt.Sprintf("user:%s", username)
@@ -213,7 +217,9 @@ func (c *Client) GetUserRepositories(ctx context.Context, username string) ([]mo
 	page := 1
 
 	for {
-		c.rateLimiter.CheckCoreRateLimit()
+		if err := c.rateLimiter.CheckCoreRateLimit(ctx); err != nil {
+			return nil, err
+		}
 
 		url := fmt.Sprintf("https://api.github.com/users/%s/repos?per_page=100&page=%d", username, page)
 		cacheKey := fmt.Sprintf("repos:%s:%d", username, page)
@@ -295,7 +301,9 @@ func (c *Client) GetUserRepositories(ctx context.Context, username string) ([]mo
 
 // GetUserContributions fetches a user's contributions from GitHub
 func (c *Client) GetUserContributions(ctx context.Context, username string) (int, error) {
-	c.rateLimiter.CheckCoreRateLimit()
+	if err := c.rateLimiter.CheckCoreRateLimit(ctx); err != nil {
+		return 0, err
+	}
 
 	url := fmt.Sprintf("https://api.github.com/users/%s/events/public?per_page=100", username)
 	cacheKey := fmt.Sprintf("events:%s", username)
@@ -366,7 +374,9 @@ func (c *Client) GetUserContributions(ctx context.Context, username string) (int
 
 // GetRepoReadme fetches a repository's README from GitHub
 func (c *Client) GetRepoReadme(ctx context.Context, owner, repo string) (string, error) {
-	c.rateLimiter.CheckCoreRateLimit()
+	if err := c.rateLimiter.CheckCoreRateLimit(ctx); err != nil {
+		return "", err
+	}
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/readme", owner, repo)
 	cacheKey := fmt.Sprintf("readme:%s:%s", owner, repo)
@@ -443,7 +453,9 @@ func (c *Client) GetRepoReadme(ctx context.Context, owner, repo string) (string,
 
 // GetRepoTree fetches a repository's file tree from GitHub
 func (c *Client) GetRepoTree(ctx context.Context, owner, repo, branch string) ([]string, error) {
-	c.rateLimiter.CheckCoreRateLimit()
+	if err := c.rateLimiter.CheckCoreRateLimit(ctx); err != nil {
+		return nil, err
+	}
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/git/trees/%s?recursive=1", owner, repo, branch)
 	cacheKey := fmt.Sprintf("tree:%s:%s:%s", owner, repo, branch)
@@ -515,7 +527,9 @@ func (c *Client) GetRepoTree(ctx context.Context, owner, repo, branch string) ([
 
 // CheckRepoReleases checks a repository's releases for malicious files
 func (c *Client) CheckRepoReleases(ctx context.Context, owner, repo string) (bool, error) {
-	c.rateLimiter.CheckCoreRateLimit()
+	if err := c.rateLimiter.CheckCoreRateLimit(ctx); err != nil {
+		return false, err
+	}
 
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", owner, repo)
 	cacheKey := fmt.Sprintf("releases:%s:%s", owner, repo)
@@ -590,4 +604,16 @@ func (c *Client) CheckRepoReleases(ctx context.Context, owner, repo string) (boo
 // FetchRateLimits gets GitHub API rate limit information
 func (c *Client) FetchRateLimits(ctx context.Context) error {
 	return c.rateLimiter.FetchRateLimits(ctx, c.token)
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

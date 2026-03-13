@@ -14,15 +14,15 @@ import (
 
 // RateLimiter handles GitHub API rate limiting
 type RateLimiter struct {
-	mutex              sync.Mutex
-	coreRemaining      int
-	coreReset          time.Time
-	searchRemaining    int
-	searchReset        time.Time
-	coreLimitBuffer    int  // Buffer for core API (5000/hour)
-	searchLimitBuffer  int  // Buffer for search API (30/minute)
-	lastCheck          time.Time
-	checkInterval      time.Duration
+	mutex             sync.Mutex
+	coreRemaining     int
+	coreReset         time.Time
+	searchRemaining   int
+	searchReset       time.Time
+	coreLimitBuffer   int // Buffer for core API (5000/hour)
+	searchLimitBuffer int // Buffer for search API (30/minute)
+	lastCheck         time.Time
+	checkInterval     time.Duration
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -33,7 +33,7 @@ func NewRateLimiter(buffer int) *RateLimiter {
 		coreRemaining:     5000, // GitHub core API default
 		searchRemaining:   30,   // GitHub search API default
 		coreLimitBuffer:   buffer,
-		searchLimitBuffer: 3,    // Fixed buffer for search (10% of 30)
+		searchLimitBuffer: 3, // Fixed buffer for search (10% of 30)
 		checkInterval:     5 * time.Minute,
 	}
 }
@@ -42,10 +42,10 @@ func NewRateLimiter(buffer int) *RateLimiter {
 func (r *RateLimiter) UpdateFromResponse(resp *http.Response) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	
+
 	// Determine if this is a search or core API request based on URL
 	isSearchRequest := strings.Contains(resp.Request.URL.Path, "/search/")
-	
+
 	if remaining := resp.Header.Get("X-RateLimit-Remaining"); remaining != "" {
 		if val, err := strconv.Atoi(remaining); err == nil {
 			if isSearchRequest {
@@ -57,7 +57,7 @@ func (r *RateLimiter) UpdateFromResponse(resp *http.Response) {
 			log.Printf("Error parsing X-RateLimit-Remaining: %v", err)
 		}
 	}
-	
+
 	if reset := resp.Header.Get("X-RateLimit-Reset"); reset != "" {
 		if val, err := strconv.ParseInt(reset, 10, 64); err == nil {
 			if isSearchRequest {
@@ -71,26 +71,23 @@ func (r *RateLimiter) UpdateFromResponse(resp *http.Response) {
 	}
 
 	r.lastCheck = time.Now()
-	
+
 	if isSearchRequest {
-		log.Printf("Search API limit: %d remaining, resets at %s", 
+		log.Printf("Search API limit: %d remaining, resets at %s",
 			r.searchRemaining, r.searchReset)
 	} else {
-		log.Printf("Core API limit: %d remaining, resets at %s", 
+		log.Printf("Core API limit: %d remaining, resets at %s",
 			r.coreRemaining, r.coreReset)
 	}
 }
 
-// CheckRateLimit checks if we're approaching rate limit
-// Returns true if we should proceed, false if we should wait
-// The apiType parameter should be "search" or "core"
-func (r *RateLimiter) CheckRateLimit(apiType string) bool {
+// CheckRateLimit checks if we're approaching rate limit.
+// The apiType parameter should be "search" or "core".
+func (r *RateLimiter) CheckRateLimit(ctx context.Context, apiType string) error {
 	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	var remaining, buffer int
 	var resetTime time.Time
-	
+
 	// Select the appropriate rate limit based on API type
 	if apiType == "search" {
 		remaining = r.searchRemaining
@@ -102,48 +99,58 @@ func (r *RateLimiter) CheckRateLimit(apiType string) bool {
 		buffer = r.coreLimitBuffer
 		resetTime = r.coreReset
 	}
+	r.mutex.Unlock()
 
 	// Check if we're approaching the rate limit
 	// We should have at least buffer requests available
 	if remaining < buffer {
 		// Rate limit approaching, continue to wait logic
 	} else {
-		return true // We have enough remaining requests
+		return nil
 	}
 
 	// If reset time is in the past, we can proceed (but this should be updated soon)
 	if time.Now().After(resetTime) {
-		return true
+		return nil
 	}
 
 	// We're approaching rate limit, calculate wait time
 	waitTime := time.Until(resetTime) + 5*time.Second
-	
+
 	log.Printf("%s API rate limit approaching (%d remaining). Waiting until reset + 5s: %s",
 		apiType, remaining, waitTime)
-	
-	time.Sleep(waitTime)
+
+	timer := time.NewTimer(waitTime)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+	}
 
 	// After waiting, reset our remaining count to avoid immediate re-wait
 	// Next API call will update this with actual values
+	r.mutex.Lock()
 	if apiType == "search" {
 		r.searchRemaining = r.searchLimitBuffer + 1
 	} else {
 		r.coreRemaining = r.coreLimitBuffer + 1
 	}
-	
+	r.mutex.Unlock()
+
 	log.Printf("%s API rate limit wait complete. Proceeding with requests.", apiType)
-	return true
+	return nil
 }
 
 // CheckSearchRateLimit convenience method for checking search API rate limit
-func (r *RateLimiter) CheckSearchRateLimit() bool {
-	return r.CheckRateLimit("search")
+func (r *RateLimiter) CheckSearchRateLimit(ctx context.Context) error {
+	return r.CheckRateLimit(ctx, "search")
 }
 
-// CheckCoreRateLimit convenience method for checking core API rate limit 
-func (r *RateLimiter) CheckCoreRateLimit() bool {
-	return r.CheckRateLimit("core")
+// CheckCoreRateLimit convenience method for checking core API rate limit
+func (r *RateLimiter) CheckCoreRateLimit(ctx context.Context) error {
+	return r.CheckRateLimit(ctx, "core")
 }
 
 // FetchRateLimits explicitly gets current rate limit status
@@ -199,8 +206,8 @@ func (r *RateLimiter) FetchRateLimits(ctx context.Context, token string) error {
 	r.searchRemaining = rateLimit.Resources.Search.Remaining
 	r.searchReset = time.Unix(rateLimit.Resources.Search.Reset, 0)
 	r.lastCheck = time.Now()
-	
-	log.Printf("Current rate limits - Core: %d/%d (resets at %s), Search: %d/%d (resets at %s)", 
+
+	log.Printf("Current rate limits - Core: %d/%d (resets at %s), Search: %d/%d (resets at %s)",
 		rateLimit.Resources.Core.Remaining, rateLimit.Resources.Core.Limit,
 		r.coreReset.Format(time.RFC3339),
 		rateLimit.Resources.Search.Remaining, rateLimit.Resources.Search.Limit,
