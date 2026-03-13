@@ -158,6 +158,13 @@ Checkpoint state is manageable from the CLI:
 ./githubwatchdog checkpoints delete backlog
 ```
 
+You can also move checkpoint state between environments:
+
+```bash
+./githubwatchdog checkpoints export backlog --format json > backlog.json
+./githubwatchdog checkpoints import --input backlog.json
+```
+
 ### Direct Repository Scan
 
 ```bash
@@ -211,6 +218,7 @@ Options:
 -   `--checkpoint`: Save the effective search metadata and next resume cursor under a name
 -   `--resume`: Reload defaults from the named checkpoint before applying explicit flags
 -   `checkpoints list|show|delete`: Inspect or prune saved search checkpoints
+-   `checkpoints export|import`: Move checkpoint state between machines or runners
 
 Example with custom port:
 

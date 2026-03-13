@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -393,6 +394,7 @@ func runCheckpointCommand(args []string, stdout, stderr io.Writer, database *db.
 	fs := flag.NewFlagSet("checkpoints", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "text", "Output format: json or text")
+	input := fs.String("input", "-", "Import input path for checkpoints import; use - for stdin")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -429,9 +431,49 @@ func runCheckpointCommand(args []string, stdout, stderr io.Writer, database *db.
 			return errors.New("checkpoints delete requires a checkpoint name")
 		}
 		return database.DeleteSearchCheckpoint(fs.Arg(1))
+	case "export":
+		return runCheckpointExport(stdout, *format, database, fs.Args()[1:])
+	case "import":
+		return runCheckpointImport(stdout, *format, database, *input)
 	default:
 		return fmt.Errorf("unknown checkpoints subcommand %q", subcommand)
 	}
+}
+
+func runCheckpointExport(stdout io.Writer, format string, database *db.Database, args []string) error {
+	switch len(args) {
+	case 0:
+		checkpoints, err := database.ListSearchCheckpoints()
+		if err != nil {
+			return err
+		}
+		return writeCheckpointList(stdout, format, checkpoints)
+	case 1:
+		checkpoint, err := database.GetSearchCheckpoint(args[0])
+		if err != nil {
+			return err
+		}
+		return writeCheckpoint(stdout, format, checkpoint)
+	default:
+		return errors.New("checkpoints export accepts at most one checkpoint name")
+	}
+}
+
+func runCheckpointImport(stdout io.Writer, format string, database *db.Database, inputPath string) error {
+	data, err := readCheckpointImportInput(inputPath)
+	if err != nil {
+		return err
+	}
+	checkpoints, err := decodeCheckpointImport(data)
+	if err != nil {
+		return err
+	}
+	for _, checkpoint := range checkpoints {
+		if err := database.UpsertSearchCheckpoint(checkpoint); err != nil {
+			return err
+		}
+	}
+	return writeCheckpointImportResult(stdout, format, len(checkpoints))
 }
 
 func runServeSubcommand(args []string, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
@@ -546,7 +588,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  githubwatchdog [global flags] search [search flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] repo <owner>/<repo> [scan flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] user <username> [scan flags]")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] checkpoints <list|show|delete> [args]")
+	fmt.Fprintln(w, "  githubwatchdog [global flags] checkpoints <list|show|delete|export|import> [args]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] serve [serve flags]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Global flags:")
@@ -691,6 +733,10 @@ func validateCheckpointFormat(format string) error {
 	default:
 		return fmt.Errorf("invalid format %q: expected json or text", format)
 	}
+}
+
+type checkpointImportResult struct {
+	Imported int `json:"imported"`
 }
 
 func buildSearchQuery(baseQuery, since, updatedBefore string) (string, error) {
@@ -906,6 +952,19 @@ func writeCheckpoint(w io.Writer, format string, checkpoint db.SearchCheckpoint)
 	}
 }
 
+func writeCheckpointImportResult(w io.Writer, format string, imported int) error {
+	result := checkpointImportResult{Imported: imported}
+	switch format {
+	case "json":
+		return writeJSON(w, result)
+	case "text":
+		_, err := fmt.Fprintf(w, "Imported %d checkpoint(s).\n", imported)
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
 func saveSearchCheckpoint(database *db.Database, report scan.SearchReport) error {
 	if database == nil || report.CheckpointName == "" {
 		return nil
@@ -921,6 +980,43 @@ func saveSearchCheckpoint(database *db.Database, report scan.SearchReport) error
 		OldestUpdatedAt:   report.OldestUpdatedAt,
 		CompletedAt:       report.CompletedAt,
 	})
+}
+
+func readCheckpointImportInput(path string) ([]byte, error) {
+	if path == "-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("reading checkpoint import from stdin: %w", err)
+		}
+		return data, nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading checkpoint import file: %w", err)
+	}
+	return data, nil
+}
+
+func decodeCheckpointImport(data []byte) ([]db.SearchCheckpoint, error) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil, errors.New("checkpoint import is empty")
+	}
+
+	if data[0] == '[' {
+		var checkpoints []db.SearchCheckpoint
+		if err := json.Unmarshal(data, &checkpoints); err != nil {
+			return nil, fmt.Errorf("decoding checkpoint import array: %w", err)
+		}
+		return checkpoints, nil
+	}
+
+	var checkpoint db.SearchCheckpoint
+	if err := json.Unmarshal(data, &checkpoint); err != nil {
+		return nil, fmt.Errorf("decoding checkpoint import object: %w", err)
+	}
+	return []db.SearchCheckpoint{checkpoint}, nil
 }
 
 func flagPassed(fs *flag.FlagSet, name string) bool {

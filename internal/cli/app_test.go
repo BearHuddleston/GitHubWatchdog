@@ -201,3 +201,39 @@ func TestWriteCheckpointList(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeCheckpointImportObject(t *testing.T) {
+	checkpoints, err := decodeCheckpointImport([]byte(`{"name":"recent","base_query":"stars:>5"}`))
+	if err != nil {
+		t.Fatalf("decodeCheckpointImport(object) error = %v", err)
+	}
+	if len(checkpoints) != 1 || checkpoints[0].Name != "recent" {
+		t.Fatalf("decodeCheckpointImport(object) = %+v", checkpoints)
+	}
+}
+
+func TestDecodeCheckpointImportArray(t *testing.T) {
+	checkpoints, err := decodeCheckpointImport([]byte(`[{"name":"one"},{"name":"two"}]`))
+	if err != nil {
+		t.Fatalf("decodeCheckpointImport(array) error = %v", err)
+	}
+	if len(checkpoints) != 2 || checkpoints[1].Name != "two" {
+		t.Fatalf("decodeCheckpointImport(array) = %+v", checkpoints)
+	}
+}
+
+func TestDecodeCheckpointImportRejectsEmpty(t *testing.T) {
+	if _, err := decodeCheckpointImport([]byte("   ")); err == nil {
+		t.Fatal("decodeCheckpointImport(empty) expected error")
+	}
+}
+
+func TestWriteCheckpointImportResult(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeCheckpointImportResult(&buf, "text", 2); err != nil {
+		t.Fatalf("writeCheckpointImportResult() error = %v", err)
+	}
+	if got := buf.String(); got != "Imported 2 checkpoint(s).\n" {
+		t.Fatalf("writeCheckpointImportResult() = %q", got)
+	}
+}
