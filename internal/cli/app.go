@@ -164,6 +164,16 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		defer database.Close()
 		return runUserCommand(commandArgs, stdout, stderr, cfg, database, appLogger)
+	case "verdict":
+		if helpRequested(commandArgs) {
+			return runVerdictCommand(commandArgs, stdout, stderr, defaultConfig(), nil, logger.New(false))
+		}
+		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
+		if err != nil {
+			return err
+		}
+		defer database.Close()
+		return runVerdictCommand(commandArgs, stdout, stderr, cfg, database, appLogger)
 	case "checkpoints":
 		database, err := db.New(*dbPath)
 		if err != nil {
@@ -422,6 +432,75 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 	return nil
 }
 
+func runVerdictCommand(args []string, stdout, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
+	fs := flag.NewFlagSet("verdict", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
+	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
+	format := fs.String("format", "json", "Output format: json, ndjson, or text")
+	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("verdict command requires a single <owner>/<repo> or <username> argument")
+	}
+	if err := validateFormat(*format); err != nil {
+		return err
+	}
+
+	target := fs.Arg(0)
+	if strings.Count(target, "/") == 1 {
+		owner, repo, err := parseRepoRef(target)
+		if err != nil {
+			return err
+		}
+		service := newScanService(cfg, database, appLogger)
+		ctx, cancel := interruptibleContext(*timeout)
+		defer cancel()
+		report, err := service.ScanRepository(ctx, owner, repo, scan.RepoOptions{
+			Persist:         *persist,
+			SkipIfUnchanged: false,
+			AnalyzeOwner:    true,
+		})
+		if err != nil {
+			return err
+		}
+		summary := summarizeRepoReport(report)
+		if err := writeRepoSummary(stdout, *format, summary); err != nil {
+			return err
+		}
+		if *failOnFindings && summary.IsFlagged {
+			return exitError{code: exitCodeFindings}
+		}
+		return nil
+	}
+	if strings.Contains(target, "/") {
+		return fmt.Errorf("invalid verdict target %q: expected <owner>/<repo> or <username>", target)
+	}
+
+	service := newScanService(cfg, database, appLogger)
+	ctx, cancel := interruptibleContext(*timeout)
+	defer cancel()
+	report, err := service.ScanUser(ctx, target, scan.UserOptions{Persist: *persist})
+	if err != nil {
+		return err
+	}
+	summary := summarizeUserReport(report)
+	if err := writeUserSummary(stdout, *format, summary); err != nil {
+		return err
+	}
+	if *failOnFindings && summary.IsSuspicious {
+		return exitError{code: exitCodeFindings}
+	}
+	return nil
+}
+
 func runCheckpointCommand(args []string, stdout, stderr io.Writer, database *db.Database) error {
 	fs := flag.NewFlagSet("checkpoints", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -620,6 +699,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  githubwatchdog [global flags] search [search flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] repo <owner>/<repo> [scan flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] user <username> [scan flags]")
+	fmt.Fprintln(w, "  githubwatchdog [global flags] verdict <owner/repo|username> [verdict flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] checkpoints <list|show|delete|export|import> [args]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] serve [serve flags]")
 	fmt.Fprintln(w)

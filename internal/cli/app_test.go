@@ -297,3 +297,33 @@ func TestWriteRepoSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestVerdictTargetShape(t *testing.T) {
+	if strings.Count("owner/repo", "/") != 1 {
+		t.Fatal("expected repo target to contain exactly one slash")
+	}
+	if strings.Count("octocat", "/") != 0 {
+		t.Fatal("expected user target to contain no slash")
+	}
+}
+
+func TestWriteUserSummary(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeUserSummary(&buf, "text", userSummary{
+		Username:       "octocat",
+		IsSuspicious:   true,
+		HeuristicCount: 1,
+		Heuristics:     []string{"Automated Activity:GeneratedPortfolioHeuristic"},
+		Contributions:  4,
+		TotalStars:     50,
+	})
+	if err != nil {
+		t.Fatalf("writeUserSummary() error = %v", err)
+	}
+	output := buf.String()
+	for _, needle := range []string{"User: octocat", "Suspicious: true", "Heuristic: Automated Activity:GeneratedPortfolioHeuristic"} {
+		if !strings.Contains(output, needle) {
+			t.Fatalf("writeUserSummary() missing %q in %q", needle, output)
+		}
+	}
+}

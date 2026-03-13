@@ -170,6 +170,8 @@ For targeted agent checks, request a compact verdict instead of the full repo/us
 ```bash
 ./githubwatchdog repo BearHuddleston/GitHubWatchdog --summary
 ./githubwatchdog user octocat --summary --format json
+./githubwatchdog verdict BearHuddleston/GitHubWatchdog
+./githubwatchdog verdict octocat
 ```
 
 ### Direct Repository Scan
@@ -227,6 +229,7 @@ Options:
 -   `checkpoints list|show|delete`: Inspect or prune saved search checkpoints
 -   `checkpoints export|import`: Move checkpoint state between machines or runners
 -   `repo --summary` / `user --summary`: Emit a compact machine-readable verdict block
+-   `verdict <owner/repo|username>`: Auto-detect the target type and emit the compact verdict block
 
 Example with custom port:
 
