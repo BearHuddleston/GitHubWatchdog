@@ -26,18 +26,20 @@ type Client struct {
 	logger      *logger.Logger
 }
 
-// NewClient creates a new GitHub client
-func NewClient(token string, bufferSize int, cacheTTLMinutes int, verbose bool) *Client {
+// NewClient creates a new GitHub client.
+func NewClient(token string, bufferSize int, cacheTTLMinutes int, appLogger *logger.Logger) *Client {
 	cacheTTL := time.Duration(cacheTTLMinutes) * time.Minute
-	log := logger.New(verbose)
+	if appLogger == nil {
+		appLogger = logger.New(false)
+	}
 
 	return &Client{
 		httpClient:  &http.Client{Timeout: 30 * time.Second},
 		token:       token,
 		apiCache:    NewAPICache(),
-		rateLimiter: NewRateLimiter(bufferSize),
+		rateLimiter: NewRateLimiter(bufferSize, appLogger),
 		cacheTTL:    cacheTTL,
-		logger:      log,
+		logger:      appLogger,
 	}
 }
 

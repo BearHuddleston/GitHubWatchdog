@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
 )
 
 func TestCheckCoreRateLimitHonorsContextCancellation(t *testing.T) {
-	limiter := NewRateLimiter(500)
+	limiter := NewRateLimiter(500, logger.New(false))
 	limiter.coreRemaining = 0
 	limiter.coreReset = time.Now().Add(time.Minute)
 

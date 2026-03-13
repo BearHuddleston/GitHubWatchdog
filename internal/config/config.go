@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 )
 
 // Config holds application configuration. Optional fields use pointers.
@@ -13,7 +15,7 @@ type Config struct {
 	MaxPages        *int   `json:"max_pages"`
 	PerPage         *int   `json:"per_page"`
 	GitHubQuery     string `json:"github_query"` // mandatory
-	Token           string `json:"-"`            // loaded from env var
+	Token           string `json:"-"`            // loaded from env vars or gh auth
 	MaxConcurrent   *int   `json:"max_concurrent"`
 	RateLimitBuffer *int   `json:"rate_limit_buffer"` // minimum remaining rate limit before pausing
 	CacheTTL        *int   `json:"cache_ttl"`         // cache time-to-live in minutes
@@ -32,7 +34,7 @@ func New(configPath string) (*Config, error) {
 	conf := Config{
 		MaxPages:        &maxPages,
 		PerPage:         &perPage,
-		GitHubQuery:     "created:>2025-01-31 stars:>5",
+		GitHubQuery:     "stars:>5",
 		MaxConcurrent:   &maxConcurrent,
 		RateLimitBuffer: &rateLimitBuffer,
 		CacheTTL:        &cacheTTL,
@@ -53,11 +55,47 @@ func New(configPath string) (*Config, error) {
 		return nil, errors.New("github_query must be set in config.json")
 	}
 
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		conf.Token = token
-	}
+	conf.Token = resolveGitHubToken()
 	if conf.Token == "" {
-		return nil, errors.New("please set the GITHUB_TOKEN environment variable")
+		return nil, errors.New("please set GITHUB_TOKEN or GH_TOKEN, or authenticate gh")
 	}
 	return &conf, nil
+}
+
+func resolveGitHubToken() string {
+	return resolveGitHubTokenWith(os.Getenv, ghAuthToken)
+}
+
+func resolveGitHubTokenWith(getenv func(string) string, ghToken func() (string, error)) string {
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if token := strings.TrimSpace(getenv(name)); token != "" {
+			return token
+		}
+	}
+	if token, err := ghToken(); err == nil {
+		return strings.TrimSpace(token)
+	}
+	return ""
+}
+
+func ghAuthToken() (string, error) {
+	for _, candidate := range []string{"gh", "/home/linuxbrew/.linuxbrew/bin/gh"} {
+		if candidate == "gh" {
+			if _, err := exec.LookPath(candidate); err != nil {
+				continue
+			}
+		} else {
+			if _, err := os.Stat(candidate); err != nil {
+				continue
+			}
+		}
+		output, err := exec.Command(candidate, "auth", "token").Output()
+		if err != nil {
+			continue
+		}
+		if token := strings.TrimSpace(string(output)); token != "" {
+			return token, nil
+		}
+	}
+	return "", errors.New("gh auth token unavailable")
 }

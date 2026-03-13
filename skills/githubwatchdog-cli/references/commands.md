@@ -4,6 +4,8 @@
 
 Use `search` for broad repository discovery.
 
+Auth can come from `GITHUB_TOKEN`, `GH_TOKEN`, or a logged-in `gh` session.
+
 ```bash
 go run ./cmd/app search --profile recent --only-flagged --format ndjson
 go run ./cmd/app search --query 'stars:>20' --since 2026-03-01 --updated-before 2026-03-13
@@ -29,6 +31,7 @@ Output notes:
 - `json` returns a single search report.
 - `ndjson` streams per-result objects and ends with a summary object.
 - `--fail-on-findings` returns exit code `10` when flagged results are present.
+- Add the global `-quiet` flag when the caller wants clean stderr during machine-readable runs.
 
 ## Repository and User Scans
 

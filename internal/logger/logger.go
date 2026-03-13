@@ -8,6 +8,7 @@ import (
 // Logger is a custom logger with verbosity control
 type Logger struct {
 	verbose bool
+	quiet   bool
 }
 
 // New creates a new logger with verbosity control
@@ -17,8 +18,19 @@ func New(verbose bool) *Logger {
 	}
 }
 
+// NewWithQuiet creates a logger that can suppress informational output.
+func NewWithQuiet(verbose, quiet bool) *Logger {
+	return &Logger{
+		verbose: verbose,
+		quiet:   quiet,
+	}
+}
+
 // Info logs informational messages that are always shown
 func (l *Logger) Info(format string, v ...interface{}) {
+	if l.quiet {
+		return
+	}
 	log.Printf(format, v...)
 }
 

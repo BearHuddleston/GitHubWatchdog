@@ -15,7 +15,7 @@ Read [references/commands.md](references/commands.md) when you need exact comman
 
 Before running scans:
 
-- Ensure `GITHUB_TOKEN` is set, or confirm the requested config file contains a token.
+- Ensure auth is available through `GITHUB_TOKEN`, `GH_TOKEN`, an authenticated `gh` session, or a config file token.
 - Run commands from the repo root.
 - Prefer the existing SQLite database unless the user asks for an isolated run.
 - Use `--persist=false` for one-off checks that should not mutate local scan state.
@@ -38,6 +38,7 @@ Prefer these output modes:
 - Use `--format json` for single-shot machine-readable output.
 - Use `--format ndjson` for long-running or streaming workflows.
 - Use `--format text` only when the user explicitly wants a human-oriented summary.
+- Add the global `-quiet` flag when informational stderr logs would interfere with an automation flow.
 
 Prefer these control flags:
 

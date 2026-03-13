@@ -12,12 +12,21 @@ The CLI is designed to be agent-friendly:
 ## Requirements
 
 - Go 1.23.5 or newer
-- A GitHub token in `GITHUB_TOKEN`
+- GitHub auth via one of:
+  - `GITHUB_TOKEN`
+  - `GH_TOKEN`
+  - an authenticated `gh` session
 
 Example:
 
 ```bash
 export GITHUB_TOKEN=your_token_here
+```
+
+Or authenticate once with GitHub CLI:
+
+```bash
+gh auth login
 ```
 
 ## Build
@@ -67,6 +76,7 @@ Global flags:
 
 - `-config`: path to config file, default `config.json`
 - `-db`: path to SQLite database, default `github_watchdog.db`
+- `-quiet`: suppress informational logs on stderr
 
 Running the binary with no subcommand is equivalent to `search`.
 
@@ -178,10 +188,11 @@ Notes:
 - `search` defaults to `json`, and `ndjson` streams one result per line plus a final summary line.
 - `repo`, `user`, and `verdict` support compact summary output for automation.
 - `--fail-on-findings` returns exit code `10` when suspicious results are present.
+- `-quiet` is useful for agent runs that want machine-readable output without informational stderr logs.
 
 ## Configuration
 
-`config.json` is optional. If loading it fails but `GITHUB_TOKEN` is set, the CLI falls back to built-in defaults plus the environment token.
+`config.json` is optional. The CLI can pick up auth from `GITHUB_TOKEN`, `GH_TOKEN`, or a logged-in `gh` session, and falls back to built-in defaults when no config file is present.
 
 Example `config.json`:
 
@@ -189,11 +200,11 @@ Example `config.json`:
 {
   "max_pages": 10,
   "per_page": 100,
-  "github_query": "created:>2025-02-25 stars:>5",
+  "github_query": "stars:>5",
   "max_concurrent": 50,
   "rate_limit_buffer": 500,
   "cache_ttl": 60,
-  "verbose": true
+  "verbose": false
 }
 ```
 

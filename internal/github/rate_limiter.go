@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
 )
 
 // RateLimiter handles GitHub API rate limiting
@@ -23,18 +24,23 @@ type RateLimiter struct {
 	searchLimitBuffer int // Buffer for search API (30/minute)
 	lastCheck         time.Time
 	checkInterval     time.Duration
+	logger            *logger.Logger
 }
 
 // NewRateLimiter creates a new rate limiter
-func NewRateLimiter(buffer int) *RateLimiter {
+func NewRateLimiter(buffer int, appLogger *logger.Logger) *RateLimiter {
 	// For search API, use 10% of total as buffer (3 of 30)
 	// For core API, use the provided buffer
+	if appLogger == nil {
+		appLogger = logger.New(false)
+	}
 	return &RateLimiter{
 		coreRemaining:     5000, // GitHub core API default
 		searchRemaining:   30,   // GitHub search API default
 		coreLimitBuffer:   buffer,
 		searchLimitBuffer: 3, // Fixed buffer for search (10% of 30)
 		checkInterval:     5 * time.Minute,
+		logger:            appLogger,
 	}
 }
 
@@ -54,7 +60,7 @@ func (r *RateLimiter) UpdateFromResponse(resp *http.Response) {
 				r.coreRemaining = val
 			}
 		} else {
-			log.Printf("Error parsing X-RateLimit-Remaining: %v", err)
+			r.logger.Warn("Error parsing X-RateLimit-Remaining: %v", err)
 		}
 	}
 
@@ -66,17 +72,17 @@ func (r *RateLimiter) UpdateFromResponse(resp *http.Response) {
 				r.coreReset = time.Unix(val, 0)
 			}
 		} else {
-			log.Printf("Error parsing X-RateLimit-Reset: %v", err)
+			r.logger.Warn("Error parsing X-RateLimit-Reset: %v", err)
 		}
 	}
 
 	r.lastCheck = time.Now()
 
 	if isSearchRequest {
-		log.Printf("Search API limit: %d remaining, resets at %s",
+		r.logger.Info("Search API limit: %d remaining, resets at %s",
 			r.searchRemaining, r.searchReset)
 	} else {
-		log.Printf("Core API limit: %d remaining, resets at %s",
+		r.logger.Info("Core API limit: %d remaining, resets at %s",
 			r.coreRemaining, r.coreReset)
 	}
 }
@@ -117,7 +123,7 @@ func (r *RateLimiter) CheckRateLimit(ctx context.Context, apiType string) error 
 	// We're approaching rate limit, calculate wait time
 	waitTime := time.Until(resetTime) + 5*time.Second
 
-	log.Printf("%s API rate limit approaching (%d remaining). Waiting until reset + 5s: %s",
+	r.logger.Info("%s API rate limit approaching (%d remaining). Waiting until reset + 5s: %s",
 		apiType, remaining, waitTime)
 
 	timer := time.NewTimer(waitTime)
@@ -139,7 +145,7 @@ func (r *RateLimiter) CheckRateLimit(ctx context.Context, apiType string) error 
 	}
 	r.mutex.Unlock()
 
-	log.Printf("%s API rate limit wait complete. Proceeding with requests.", apiType)
+	r.logger.Info("%s API rate limit wait complete. Proceeding with requests.", apiType)
 	return nil
 }
 
@@ -207,7 +213,7 @@ func (r *RateLimiter) FetchRateLimits(ctx context.Context, token string) error {
 	r.searchReset = time.Unix(rateLimit.Resources.Search.Reset, 0)
 	r.lastCheck = time.Now()
 
-	log.Printf("Current rate limits - Core: %d/%d (resets at %s), Search: %d/%d (resets at %s)",
+	r.logger.Info("Current rate limits - Core: %d/%d (resets at %s), Search: %d/%d (resets at %s)",
 		rateLimit.Resources.Core.Remaining, rateLimit.Resources.Core.Limit,
 		r.coreReset.Format(time.RFC3339),
 		rateLimit.Resources.Search.Remaining, rateLimit.Resources.Search.Limit,

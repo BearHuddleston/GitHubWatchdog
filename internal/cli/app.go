@@ -104,6 +104,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 
 	configPath := root.String("config", "config.json", "Path to the configuration file")
 	dbPath := root.String("db", "github_watchdog.db", "Path to the SQLite database")
+	quiet := root.Bool("quiet", false, "Suppress informational logs on stderr")
 	root.Usage = func() {
 		writeUsage(stderr)
 	}
@@ -127,7 +128,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if helpRequested(commandArgs) || listProfilesRequested(commandArgs) {
 			return runSearchCommand(commandArgs, stdout, stderr, defaultConfig(), nil, logger.New(false))
 		}
-		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
+		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath, *quiet)
 		if err != nil {
 			return err
 		}
@@ -137,7 +138,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if helpRequested(commandArgs) {
 			return runRepoCommand(commandArgs, stdout, stderr, defaultConfig(), nil, logger.New(false))
 		}
-		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
+		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath, *quiet)
 		if err != nil {
 			return err
 		}
@@ -147,7 +148,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if helpRequested(commandArgs) {
 			return runUserCommand(commandArgs, stdout, stderr, defaultConfig(), nil, logger.New(false))
 		}
-		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
+		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath, *quiet)
 		if err != nil {
 			return err
 		}
@@ -157,7 +158,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if helpRequested(commandArgs) {
 			return runVerdictCommand(commandArgs, stdout, stderr, defaultConfig(), nil, logger.New(false))
 		}
-		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
+		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath, *quiet)
 		if err != nil {
 			return err
 		}
@@ -561,25 +562,13 @@ func newScanService(cfg *config.Config, database *db.Database, appLogger *logger
 		cfg.Token,
 		intValue(cfg.RateLimitBuffer, 500),
 		intValue(cfg.CacheTTL, 60),
-		appLogger.IsVerbose(),
+		appLogger,
 	)
 	return scan.NewService(client, database)
 }
 
 func loadConfig(configPath string) (*config.Config, error) {
-	cfg, err := config.New(configPath)
-	if err == nil {
-		return cfg, nil
-	}
-
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		return nil, err
-	}
-
-	cfg = defaultConfig()
-	cfg.Token = token
-	return cfg, nil
+	return config.New(configPath)
 }
 
 func defaultConfig() *config.Config {
@@ -588,12 +577,12 @@ func defaultConfig() *config.Config {
 	maxConcurrent := 10
 	rateLimitBuffer := 500
 	cacheTTL := 60
-	verbose := true
+	verbose := false
 
 	return &config.Config{
 		MaxPages:        &maxPages,
 		PerPage:         &perPage,
-		GitHubQuery:     "created:>2025-02-23 stars:>5",
+		GitHubQuery:     "stars:>5",
 		Token:           "",
 		MaxConcurrent:   &maxConcurrent,
 		RateLimitBuffer: &rateLimitBuffer,
@@ -602,13 +591,13 @@ func defaultConfig() *config.Config {
 	}
 }
 
-func openRuntime(configPath, dbPath string) (*config.Config, *db.Database, *logger.Logger, error) {
+func openRuntime(configPath, dbPath string, quiet bool) (*config.Config, *db.Database, *logger.Logger, error) {
 	cfg, err := loadConfig(configPath)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	appLogger := logger.New(cfg.Verbose != nil && *cfg.Verbose)
+	appLogger := logger.NewWithQuiet(cfg.Verbose != nil && *cfg.Verbose, quiet)
 	database, err := db.New(dbPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("opening database: %w", err)
@@ -630,6 +619,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  -config string   Path to config file (default: config.json)")
 	fmt.Fprintln(w, "  -db string       Path to SQLite database (default: github_watchdog.db)")
+	fmt.Fprintln(w, "  -quiet           Suppress informational logs on stderr")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Notes:")
 	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
