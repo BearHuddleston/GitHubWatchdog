@@ -229,6 +229,24 @@ func (r SearchReport) FlaggedCount() int {
 	return count
 }
 
+// Filter returns a copy of the report filtered for agent or operator consumption.
+func (r SearchReport) Filter(onlyFlagged, includeSkipped bool) SearchReport {
+	filtered := r
+	filtered.Results = make([]RepoReport, 0, len(r.Results))
+
+	for _, result := range r.Results {
+		if !includeSkipped && result.Skipped {
+			continue
+		}
+		if onlyFlagged && !result.IsFlagged() {
+			continue
+		}
+		filtered.Results = append(filtered.Results, result)
+	}
+
+	return filtered
+}
+
 // IsFlagged returns whether the repository report contains suspicious findings.
 func (r RepoReport) IsFlagged() bool {
 	if r.IsMalicious || len(r.RepoFlags) > 0 {

@@ -107,6 +107,14 @@ You can also call the search command explicitly:
 ./githubwatchdog search --query 'created:>2026-01-01 stars:>5' --max-pages 2
 ```
 
+For agent workflows, these flags are the important ones:
+
+```bash
+./githubwatchdog search --only-flagged --fail-on-findings
+```
+
+That keeps the JSON payload focused on suspicious results and exits with code `10` when findings are present.
+
 ### Direct Repository Scan
 
 ```bash
@@ -149,6 +157,9 @@ Options:
 -   `serve`: Run the web interface
 -   `-config`: Specify the configuration file path
 -   `-db`: Specify the SQLite database path
+-   `--only-flagged`: Limit `search` output to repositories with findings
+-   `--include-skipped=false`: Exclude already-processed repositories from `search` output
+-   `--fail-on-findings`: Exit with code `10` when suspicious results are found
 
 Example with custom port:
 

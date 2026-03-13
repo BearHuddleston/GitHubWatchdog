@@ -71,3 +71,27 @@ func TestSearchReportCounts(t *testing.T) {
 		t.Fatalf("FlaggedCount() = %d, want 2", got)
 	}
 }
+
+func TestSearchReportFilter(t *testing.T) {
+	report := SearchReport{
+		Results: []RepoReport{
+			{RepoID: "one/repo", Skipped: true},
+			{RepoID: "two/repo", IsMalicious: true},
+			{RepoID: "three/repo"},
+			{RepoID: "four/repo", OwnerAnalysis: &UserReport{Suspicious: true}},
+		},
+	}
+
+	filtered := report.Filter(true, false)
+	if got := len(filtered.Results); got != 2 {
+		t.Fatalf("Filter(true, false) len = %d, want 2", got)
+	}
+	for _, result := range filtered.Results {
+		if !result.IsFlagged() {
+			t.Fatalf("Filter(true, false) returned non-flagged result: %+v", result)
+		}
+		if result.Skipped {
+			t.Fatalf("Filter(true, false) returned skipped result: %+v", result)
+		}
+	}
+}

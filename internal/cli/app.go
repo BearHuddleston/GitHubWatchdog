@@ -21,6 +21,21 @@ import (
 	"github.com/arkouda/github/GitHubWatchdog/internal/web"
 )
 
+const exitCodeFindings = 10
+
+type exitError struct {
+	code    int
+	message string
+}
+
+func (e exitError) Error() string {
+	return e.message
+}
+
+func (e exitError) ExitCode() int {
+	return e.code
+}
+
 // Run executes the GitHubWatchdog CLI.
 func Run(args []string, stdout, stderr io.Writer) error {
 	root := flag.NewFlagSet("githubwatchdog", flag.ContinueOnError)
@@ -123,6 +138,9 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	timeout := fs.Duration("timeout", 60*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json or text")
+	onlyFlagged := fs.Bool("only-flagged", false, "Only include flagged repositories in output")
+	includeSkipped := fs.Bool("include-skipped", true, "Include skipped repositories in output")
+	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -149,7 +167,13 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		return err
 	}
 
-	return writeSearchReport(stdout, *format, report)
+	if err := writeSearchReport(stdout, *format, report.Filter(*onlyFlagged, *includeSkipped)); err != nil {
+		return err
+	}
+	if *failOnFindings && report.FlaggedCount() > 0 {
+		return exitError{code: exitCodeFindings}
+	}
+	return nil
 }
 
 func runRepoCommand(args []string, stdout, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
@@ -159,6 +183,7 @@ func runRepoCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json or text")
+	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -191,7 +216,13 @@ func runRepoCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 		return err
 	}
 
-	return writeRepoReport(stdout, *format, report)
+	if err := writeRepoReport(stdout, *format, report); err != nil {
+		return err
+	}
+	if *failOnFindings && report.IsFlagged() {
+		return exitError{code: exitCodeFindings}
+	}
+	return nil
 }
 
 func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
@@ -201,6 +232,7 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json or text")
+	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -224,7 +256,13 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 		return err
 	}
 
-	return writeUserReport(stdout, *format, report)
+	if err := writeUserReport(stdout, *format, report); err != nil {
+		return err
+	}
+	if *failOnFindings && report.Suspicious {
+		return exitError{code: exitCodeFindings}
+	}
+	return nil
 }
 
 func runServeSubcommand(args []string, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
@@ -349,6 +387,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
 	fmt.Fprintln(w, "  - Running with no subcommand defaults to the batch search command.")
 	fmt.Fprintln(w, "  - Legacy web mode is still available via -web and -addr.")
+	fmt.Fprintln(w, "  - Exit code 10 indicates findings when --fail-on-findings is used.")
 }
 
 func writeSearchReport(w io.Writer, format string, report scan.SearchReport) error {

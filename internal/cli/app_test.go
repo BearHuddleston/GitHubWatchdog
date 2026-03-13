@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestParseRepoRef(t *testing.T) {
 	owner, repo, err := parseRepoRef("octocat/hello-world")
@@ -27,5 +30,28 @@ func TestValidateFormat(t *testing.T) {
 	}
 	if err := validateFormat("yaml"); err == nil {
 		t.Fatal("validateFormat(yaml) expected error")
+	}
+}
+
+func TestHelpRequested(t *testing.T) {
+	if !helpRequested([]string{"-h"}) {
+		t.Fatal("helpRequested(-h) = false, want true")
+	}
+	if !helpRequested([]string{"--help"}) {
+		t.Fatal("helpRequested(--help) = false, want true")
+	}
+	if helpRequested([]string{"octocat"}) {
+		t.Fatal("helpRequested(octocat) = true, want false")
+	}
+}
+
+func TestExitErrorCarriesExitCode(t *testing.T) {
+	err := exitError{code: exitCodeFindings}
+	var withCode interface{ ExitCode() int }
+	if !errors.As(err, &withCode) {
+		t.Fatal("errors.As(exitError) = false, want true")
+	}
+	if withCode.ExitCode() != exitCodeFindings {
+		t.Fatalf("ExitCode() = %d, want %d", withCode.ExitCode(), exitCodeFindings)
 	}
 }
