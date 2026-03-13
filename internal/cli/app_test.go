@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/arkouda/github/GitHubWatchdog/internal/db"
+	"github.com/arkouda/github/GitHubWatchdog/internal/models"
 	"github.com/arkouda/github/GitHubWatchdog/internal/scan"
 )
 
@@ -235,5 +236,64 @@ func TestWriteCheckpointImportResult(t *testing.T) {
 	}
 	if got := buf.String(); got != "Imported 2 checkpoint(s).\n" {
 		t.Fatalf("writeCheckpointImportResult() = %q", got)
+	}
+}
+
+func TestSummarizeRepoReport(t *testing.T) {
+	summary := summarizeRepoReport(scan.RepoReport{
+		RepoID:      "owner/repo",
+		IsMalicious: true,
+		RepoFlags: []models.HeuristicResult{
+			{Category: "Spam Behavior", Name: "BoilerplateReadmeHeuristic", Flag: true},
+		},
+		OwnerAnalysis: &scan.UserReport{Username: "owner", Suspicious: true},
+		Errors:        []string{"repo fetch failed"},
+	})
+	if !summary.IsFlagged || !summary.IsMalicious || !summary.OwnerSuspicious {
+		t.Fatalf("summarizeRepoReport() = %+v", summary)
+	}
+	if summary.RepoFlagCount != 1 || len(summary.RepoFlags) != 1 || summary.RepoFlags[0] != "Spam Behavior:BoilerplateReadmeHeuristic" {
+		t.Fatalf("summarizeRepoReport() flags = %+v", summary)
+	}
+}
+
+func TestSummarizeUserReport(t *testing.T) {
+	summary := summarizeUserReport(scan.UserReport{
+		Username:      "octocat",
+		Suspicious:    true,
+		Contributions: 4,
+		TotalStars:    50,
+		Heuristics: []models.HeuristicResult{
+			{Category: "Automated Activity", Name: "GeneratedPortfolioHeuristic", Flag: true},
+			{Category: "Spam Behavior", Name: "RecentHeuristic", Flag: false},
+		},
+		Errors: []string{"user fetch failed"},
+	})
+	if !summary.IsSuspicious || summary.HeuristicCount != 1 {
+		t.Fatalf("summarizeUserReport() = %+v", summary)
+	}
+	if len(summary.Heuristics) != 1 || summary.Heuristics[0] != "Automated Activity:GeneratedPortfolioHeuristic" {
+		t.Fatalf("summarizeUserReport() heuristics = %+v", summary)
+	}
+}
+
+func TestWriteRepoSummary(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeRepoSummary(&buf, "text", repoSummary{
+		RepoID:          "owner/repo",
+		IsFlagged:       true,
+		IsMalicious:     false,
+		OwnerSuspicious: true,
+		RepoFlagCount:   1,
+		RepoFlags:       []string{"Spam Behavior:BoilerplateReadmeHeuristic"},
+	})
+	if err != nil {
+		t.Fatalf("writeRepoSummary() error = %v", err)
+	}
+	output := buf.String()
+	for _, needle := range []string{"Repository: owner/repo", "Flagged: true", "Owner suspicious: true", "Flag: Spam Behavior:BoilerplateReadmeHeuristic"} {
+		if !strings.Contains(output, needle) {
+			t.Fatalf("writeRepoSummary() missing %q in %q", needle, output)
+		}
 	}
 }

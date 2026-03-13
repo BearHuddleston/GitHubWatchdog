@@ -165,6 +165,13 @@ You can also move checkpoint state between environments:
 ./githubwatchdog checkpoints import --input backlog.json
 ```
 
+For targeted agent checks, request a compact verdict instead of the full repo/user payload:
+
+```bash
+./githubwatchdog repo BearHuddleston/GitHubWatchdog --summary
+./githubwatchdog user octocat --summary --format json
+```
+
 ### Direct Repository Scan
 
 ```bash
@@ -219,6 +226,7 @@ Options:
 -   `--resume`: Reload defaults from the named checkpoint before applying explicit flags
 -   `checkpoints list|show|delete`: Inspect or prune saved search checkpoints
 -   `checkpoints export|import`: Move checkpoint state between machines or runners
+-   `repo --summary` / `user --summary`: Emit a compact machine-readable verdict block
 
 Example with custom port:
 

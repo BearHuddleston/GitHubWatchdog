@@ -57,6 +57,28 @@ type searchSummary struct {
 	EmittedCount      int       `json:"emitted_count"`
 }
 
+type repoSummary struct {
+	EntityType      string   `json:"entity_type"`
+	RepoID          string   `json:"repo_id"`
+	IsFlagged       bool     `json:"is_flagged"`
+	IsMalicious     bool     `json:"is_malicious"`
+	OwnerSuspicious bool     `json:"owner_suspicious"`
+	RepoFlagCount   int      `json:"repo_flag_count"`
+	RepoFlags       []string `json:"repo_flags,omitempty"`
+	Errors          []string `json:"errors,omitempty"`
+}
+
+type userSummary struct {
+	EntityType     string   `json:"entity_type"`
+	Username       string   `json:"username"`
+	IsSuspicious   bool     `json:"is_suspicious"`
+	HeuristicCount int      `json:"heuristic_count"`
+	Heuristics     []string `json:"heuristics,omitempty"`
+	Contributions  int      `json:"contributions"`
+	TotalStars     int      `json:"total_stars"`
+	Errors         []string `json:"errors,omitempty"`
+}
+
 type exitError struct {
 	code    int
 	message string
@@ -308,6 +330,7 @@ func runRepoCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json, ndjson, or text")
+	summary := fs.Bool("summary", false, "Emit a compact verdict summary instead of the full report")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
@@ -341,7 +364,11 @@ func runRepoCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 		return err
 	}
 
-	if err := writeRepoReport(stdout, *format, report); err != nil {
+	if *summary {
+		if err := writeRepoSummary(stdout, *format, summarizeRepoReport(report)); err != nil {
+			return err
+		}
+	} else if err := writeRepoReport(stdout, *format, report); err != nil {
 		return err
 	}
 	if *failOnFindings && report.IsFlagged() {
@@ -357,6 +384,7 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json, ndjson, or text")
+	summary := fs.Bool("summary", false, "Emit a compact verdict summary instead of the full report")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
@@ -381,7 +409,11 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 		return err
 	}
 
-	if err := writeUserReport(stdout, *format, report); err != nil {
+	if *summary {
+		if err := writeUserSummary(stdout, *format, summarizeUserReport(report)); err != nil {
+			return err
+		}
+	} else if err := writeUserReport(stdout, *format, report); err != nil {
 		return err
 	}
 	if *failOnFindings && report.Suspicious {
@@ -679,6 +711,32 @@ func writeRepoReport(w io.Writer, format string, report scan.RepoReport) error {
 	}
 }
 
+func writeRepoSummary(w io.Writer, format string, summary repoSummary) error {
+	switch format {
+	case "json":
+		return writeJSON(w, summary)
+	case "ndjson":
+		return writeCompactJSON(w, summary)
+	case "text":
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Repository: %s\n", summary.RepoID))
+		sb.WriteString(fmt.Sprintf("Flagged: %t\n", summary.IsFlagged))
+		sb.WriteString(fmt.Sprintf("Malicious: %t\n", summary.IsMalicious))
+		sb.WriteString(fmt.Sprintf("Owner suspicious: %t\n", summary.OwnerSuspicious))
+		sb.WriteString(fmt.Sprintf("Repo flag count: %d\n", summary.RepoFlagCount))
+		for _, flag := range summary.RepoFlags {
+			sb.WriteString(fmt.Sprintf("Flag: %s\n", flag))
+		}
+		for _, err := range summary.Errors {
+			sb.WriteString(fmt.Sprintf("Error: %s\n", err))
+		}
+		_, err := io.WriteString(w, sb.String())
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
 func writeUserReport(w io.Writer, format string, report scan.UserReport) error {
 	switch format {
 	case "json":
@@ -698,6 +756,32 @@ func writeUserReport(w io.Writer, format string, report scan.UserReport) error {
 			}
 		}
 		for _, err := range report.Errors {
+			sb.WriteString(fmt.Sprintf("Error: %s\n", err))
+		}
+		_, err := io.WriteString(w, sb.String())
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+func writeUserSummary(w io.Writer, format string, summary userSummary) error {
+	switch format {
+	case "json":
+		return writeJSON(w, summary)
+	case "ndjson":
+		return writeCompactJSON(w, summary)
+	case "text":
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("User: %s\n", summary.Username))
+		sb.WriteString(fmt.Sprintf("Suspicious: %t\n", summary.IsSuspicious))
+		sb.WriteString(fmt.Sprintf("Heuristic count: %d\n", summary.HeuristicCount))
+		sb.WriteString(fmt.Sprintf("Contributions: %d\n", summary.Contributions))
+		sb.WriteString(fmt.Sprintf("Total stars: %d\n", summary.TotalStars))
+		for _, heuristic := range summary.Heuristics {
+			sb.WriteString(fmt.Sprintf("Heuristic: %s\n", heuristic))
+		}
+		for _, err := range summary.Errors {
 			sb.WriteString(fmt.Sprintf("Error: %s\n", err))
 		}
 		_, err := io.WriteString(w, sb.String())
@@ -980,6 +1064,40 @@ func saveSearchCheckpoint(database *db.Database, report scan.SearchReport) error
 		OldestUpdatedAt:   report.OldestUpdatedAt,
 		CompletedAt:       report.CompletedAt,
 	})
+}
+
+func summarizeRepoReport(report scan.RepoReport) repoSummary {
+	summary := repoSummary{
+		EntityType:      "repo",
+		RepoID:          report.RepoID,
+		IsFlagged:       report.IsFlagged(),
+		IsMalicious:     report.IsMalicious,
+		OwnerSuspicious: report.OwnerAnalysis != nil && report.OwnerAnalysis.Suspicious,
+		RepoFlagCount:   len(report.RepoFlags),
+		Errors:          append([]string(nil), report.Errors...),
+	}
+	for _, flag := range report.RepoFlags {
+		summary.RepoFlags = append(summary.RepoFlags, fmt.Sprintf("%s:%s", flag.Category, flag.Name))
+	}
+	return summary
+}
+
+func summarizeUserReport(report scan.UserReport) userSummary {
+	summary := userSummary{
+		EntityType:    "user",
+		Username:      report.Username,
+		IsSuspicious:  report.Suspicious,
+		Contributions: report.Contributions,
+		TotalStars:    report.TotalStars,
+		Errors:        append([]string(nil), report.Errors...),
+	}
+	for _, heuristic := range report.Heuristics {
+		if heuristic.Flag {
+			summary.HeuristicCount++
+			summary.Heuristics = append(summary.Heuristics, fmt.Sprintf("%s:%s", heuristic.Category, heuristic.Name))
+		}
+	}
+	return summary
 }
 
 func readCheckpointImportInput(path string) ([]byte, error) {
