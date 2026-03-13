@@ -174,6 +174,13 @@ For targeted agent checks, request a compact verdict instead of the full repo/us
 ./githubwatchdog verdict octocat
 ```
 
+For mixed batch verdicts, feed newline-delimited targets from stdin or a file:
+
+```bash
+printf 'BearHuddleston/GitHubWatchdog\noctocat\n' | ./githubwatchdog verdict --input - --format ndjson
+./githubwatchdog verdict --input targets.txt --format ndjson --fail-on-findings
+```
+
 ### Direct Repository Scan
 
 ```bash
@@ -230,6 +237,7 @@ Options:
 -   `checkpoints export|import`: Move checkpoint state between machines or runners
 -   `repo --summary` / `user --summary`: Emit a compact machine-readable verdict block
 -   `verdict <owner/repo|username>`: Auto-detect the target type and emit the compact verdict block
+-   `verdict --input <path|->`: Scan newline-delimited mixed targets in one command
 
 Example with custom port:
 

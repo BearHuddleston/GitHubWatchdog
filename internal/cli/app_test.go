@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -304,6 +305,88 @@ func TestVerdictTargetShape(t *testing.T) {
 	}
 	if strings.Count("octocat", "/") != 0 {
 		t.Fatal("expected user target to contain no slash")
+	}
+}
+
+func TestParseVerdictTargets(t *testing.T) {
+	targets, err := parseVerdictTargets([]byte("\n owner/repo \n\noctocat\n"))
+	if err != nil {
+		t.Fatalf("parseVerdictTargets() error = %v", err)
+	}
+	if len(targets) != 2 || targets[0] != "owner/repo" || targets[1] != "octocat" {
+		t.Fatalf("parseVerdictTargets() = %#v", targets)
+	}
+}
+
+func TestParseVerdictTargetsRejectsEmpty(t *testing.T) {
+	if _, err := parseVerdictTargets([]byte(" \n\t\n")); err == nil {
+		t.Fatal("parseVerdictTargets(empty) expected error")
+	}
+}
+
+func TestVerdictHasFindings(t *testing.T) {
+	if !verdictHasFindings(repoSummary{IsFlagged: true}) {
+		t.Fatal("verdictHasFindings(repo flagged) = false, want true")
+	}
+	if !verdictHasFindings(userSummary{IsSuspicious: true}) {
+		t.Fatal("verdictHasFindings(user suspicious) = false, want true")
+	}
+	if verdictHasFindings(repoSummary{}) {
+		t.Fatal("verdictHasFindings(clean repo) = true, want false")
+	}
+}
+
+func TestWriteVerdictSummary(t *testing.T) {
+	var buf bytes.Buffer
+	if err := writeVerdictSummary(&buf, "text", repoSummary{RepoID: "owner/repo", IsFlagged: true}); err != nil {
+		t.Fatalf("writeVerdictSummary(repo) error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "Repository: owner/repo") {
+		t.Fatalf("writeVerdictSummary(repo) = %q", buf.String())
+	}
+
+	buf.Reset()
+	if err := writeVerdictSummary(&buf, "text", userSummary{Username: "octocat", IsSuspicious: true}); err != nil {
+		t.Fatalf("writeVerdictSummary(user) error = %v", err)
+	}
+	if !strings.Contains(buf.String(), "User: octocat") {
+		t.Fatalf("writeVerdictSummary(user) = %q", buf.String())
+	}
+}
+
+func TestWriteVerdictBatchJSON(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeVerdictBatch(&buf, "json", []interface{}{
+		repoSummary{EntityType: "repo", RepoID: "owner/repo", IsFlagged: true},
+		userSummary{EntityType: "user", Username: "octocat", IsSuspicious: true},
+	})
+	if err != nil {
+		t.Fatalf("writeVerdictBatch(json) error = %v", err)
+	}
+
+	var decoded []map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("writeVerdictBatch(json) produced invalid JSON: %v\n%s", err, buf.String())
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("writeVerdictBatch(json) decoded len = %d", len(decoded))
+	}
+}
+
+func TestWriteVerdictBatchText(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeVerdictBatch(&buf, "text", []interface{}{
+		repoSummary{RepoID: "owner/repo", IsFlagged: true},
+		userSummary{Username: "octocat", IsSuspicious: true},
+	})
+	if err != nil {
+		t.Fatalf("writeVerdictBatch(text) error = %v", err)
+	}
+	output := buf.String()
+	for _, needle := range []string{"Repository: owner/repo", "User: octocat"} {
+		if !strings.Contains(output, needle) {
+			t.Fatalf("writeVerdictBatch(text) missing %q in %q", needle, output)
+		}
 	}
 }
 

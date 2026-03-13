@@ -439,6 +439,7 @@ func runVerdictCommand(args []string, stdout, stderr io.Writer, cfg *config.Conf
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json, ndjson, or text")
+	input := fs.String("input", "", "Read newline-delimited verdict targets from this path; use - for stdin")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
@@ -453,49 +454,40 @@ func runVerdictCommand(args []string, stdout, stderr io.Writer, cfg *config.Conf
 	if err := validateFormat(*format); err != nil {
 		return err
 	}
-
-	target := fs.Arg(0)
-	if strings.Count(target, "/") == 1 {
-		owner, repo, err := parseRepoRef(target)
-		if err != nil {
-			return err
-		}
-		service := newScanService(cfg, database, appLogger)
-		ctx, cancel := interruptibleContext(*timeout)
-		defer cancel()
-		report, err := service.ScanRepository(ctx, owner, repo, scan.RepoOptions{
-			Persist:         *persist,
-			SkipIfUnchanged: false,
-			AnalyzeOwner:    true,
-		})
-		if err != nil {
-			return err
-		}
-		summary := summarizeRepoReport(report)
-		if err := writeRepoSummary(stdout, *format, summary); err != nil {
-			return err
-		}
-		if *failOnFindings && summary.IsFlagged {
-			return exitError{code: exitCodeFindings}
-		}
-		return nil
+	if strings.TrimSpace(*input) != "" && fs.NArg() > 0 {
+		return errors.New("verdict command accepts either a single target argument or --input, not both")
 	}
-	if strings.Contains(target, "/") {
-		return fmt.Errorf("invalid verdict target %q: expected <owner>/<repo> or <username>", target)
+	if strings.TrimSpace(*input) == "" && fs.NArg() != 1 {
+		return errors.New("verdict command requires a single <owner>/<repo> or <username> argument, or --input for batch mode")
 	}
 
 	service := newScanService(cfg, database, appLogger)
 	ctx, cancel := interruptibleContext(*timeout)
 	defer cancel()
-	report, err := service.ScanUser(ctx, target, scan.UserOptions{Persist: *persist})
+
+	if strings.TrimSpace(*input) != "" {
+		targets, err := readVerdictTargets(*input)
+		if err != nil {
+			return err
+		}
+		anyFindings, err := runVerdictBatch(ctx, stdout, *format, service, targets, *persist)
+		if err != nil {
+			return err
+		}
+		if *failOnFindings && anyFindings {
+			return exitError{code: exitCodeFindings}
+		}
+		return nil
+	}
+
+	summary, err := scanVerdictTarget(ctx, service, fs.Arg(0), *persist)
 	if err != nil {
 		return err
 	}
-	summary := summarizeUserReport(report)
-	if err := writeUserSummary(stdout, *format, summary); err != nil {
+	if err := writeVerdictSummary(stdout, *format, summary); err != nil {
 		return err
 	}
-	if *failOnFindings && summary.IsSuspicious {
+	if *failOnFindings && verdictHasFindings(summary) {
 		return exitError{code: exitCodeFindings}
 	}
 	return nil
@@ -871,6 +863,17 @@ func writeUserSummary(w io.Writer, format string, summary userSummary) error {
 	}
 }
 
+func writeVerdictSummary(w io.Writer, format string, summary interface{}) error {
+	switch typed := summary.(type) {
+	case repoSummary:
+		return writeRepoSummary(w, format, typed)
+	case userSummary:
+		return writeUserSummary(w, format, typed)
+	default:
+		return fmt.Errorf("unsupported verdict summary type %T", summary)
+	}
+}
+
 func writeJSON(w io.Writer, value interface{}) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -1178,6 +1181,123 @@ func summarizeUserReport(report scan.UserReport) userSummary {
 		}
 	}
 	return summary
+}
+
+func readVerdictTargets(path string) ([]string, error) {
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("reading verdict targets from stdin: %w", err)
+		}
+	} else {
+		data, err = os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("reading verdict targets file: %w", err)
+		}
+	}
+	return parseVerdictTargets(data)
+}
+
+func parseVerdictTargets(data []byte) ([]string, error) {
+	var targets []string
+	for _, line := range strings.Split(string(data), "\n") {
+		target := strings.TrimSpace(line)
+		if target == "" {
+			continue
+		}
+		targets = append(targets, target)
+	}
+	if len(targets) == 0 {
+		return nil, errors.New("verdict input is empty")
+	}
+	return targets, nil
+}
+
+func runVerdictBatch(ctx context.Context, stdout io.Writer, format string, service *scan.Service, targets []string, persist bool) (bool, error) {
+	anyFindings := false
+	summaries := make([]interface{}, 0, len(targets))
+	for _, target := range targets {
+		summary, err := scanVerdictTarget(ctx, service, target, persist)
+		if err != nil {
+			return false, err
+		}
+		if verdictHasFindings(summary) {
+			anyFindings = true
+		}
+		summaries = append(summaries, summary)
+	}
+	if err := writeVerdictBatch(stdout, format, summaries); err != nil {
+		return false, err
+	}
+	return anyFindings, nil
+}
+
+func scanVerdictTarget(ctx context.Context, service *scan.Service, target string, persist bool) (interface{}, error) {
+	switch strings.Count(target, "/") {
+	case 0:
+		report, err := service.ScanUser(ctx, target, scan.UserOptions{Persist: persist})
+		if err != nil {
+			return nil, err
+		}
+		return summarizeUserReport(report), nil
+	case 1:
+		owner, repo, err := parseRepoRef(target)
+		if err != nil {
+			return nil, err
+		}
+		report, err := service.ScanRepository(ctx, owner, repo, scan.RepoOptions{
+			Persist:         persist,
+			SkipIfUnchanged: false,
+			AnalyzeOwner:    true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return summarizeRepoReport(report), nil
+	default:
+		return nil, fmt.Errorf("invalid verdict target %q: expected <owner>/<repo> or <username>", target)
+	}
+}
+
+func verdictHasFindings(summary interface{}) bool {
+	switch typed := summary.(type) {
+	case repoSummary:
+		return typed.IsFlagged
+	case userSummary:
+		return typed.IsSuspicious
+	default:
+		return false
+	}
+}
+
+func writeVerdictBatch(w io.Writer, format string, summaries []interface{}) error {
+	switch format {
+	case "json":
+		return writeJSON(w, summaries)
+	case "ndjson":
+		for _, summary := range summaries {
+			if err := writeVerdictSummary(w, format, summary); err != nil {
+				return err
+			}
+		}
+		return nil
+	case "text":
+		for i, summary := range summaries {
+			if i > 0 {
+				if _, err := io.WriteString(w, "\n"); err != nil {
+					return err
+				}
+			}
+			if err := writeVerdictSummary(w, format, summary); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
 }
 
 func readCheckpointImportInput(path string) ([]byte, error) {
