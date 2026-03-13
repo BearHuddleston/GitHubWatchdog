@@ -80,7 +80,6 @@ func loadConfig() (*config.Config, error) {
 	rateLimitBuffer := 500
 	cacheTTL := 60
 	verbose := true
-	ollamaEnabled := false
 
 	return &config.Config{
 		MaxPages:        &maxPages,
@@ -91,32 +90,13 @@ func loadConfig() (*config.Config, error) {
 		RateLimitBuffer: &rateLimitBuffer,
 		CacheTTL:        &cacheTTL,
 		Verbose:         &verbose,
-		Ollama: &config.OllamaConfig{
-			Enabled:  &ollamaEnabled,
-			Endpoint: "http://localhost:11434",
-			Model:    "llama3.2",
-		},
 	}, nil
 }
 
 // runWebServer starts the web server
 func runWebServer(database *db.Database, cfg *config.Config, addr string, appLogger *logger.Logger) {
-	// Configure the web server
-	ollamaEndpoint := "http://localhost:11434"
-	ollamaModel := "llama3.2"
-	ollamaEnabled := false
-
-	if cfg.Ollama != nil {
-		ollamaEnabled = *cfg.Ollama.Enabled
-		ollamaEndpoint = cfg.Ollama.Endpoint
-		ollamaModel = cfg.Ollama.Model
-	}
-
 	serverConfig := &web.ServerConfig{
-		GitHubToken:    cfg.Token,
-		OllamaEnabled:  ollamaEnabled,
-		OllamaEndpoint: ollamaEndpoint,
-		OllamaModel:    ollamaModel,
+		GitHubToken: cfg.Token,
 	}
 
 	server := web.NewServer(database, addr, appLogger, serverConfig)

@@ -5,10 +5,5 @@
     "max_concurrent": 50,
     "rate_limit_buffer": 500,
     "cache_ttl": 60,
-    "verbose": true,
-    "ollama": {
-        "enabled": true,
-        "endpoint": "http://localhost:11434",
-        "model": "llama3.2"
-    }
+    "verbose": true
 }

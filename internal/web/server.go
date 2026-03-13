@@ -13,35 +13,26 @@ import (
 
 // ServerConfig holds the configuration for the web server
 type ServerConfig struct {
-	GitHubToken    string
-	OllamaEnabled  bool
-	OllamaEndpoint string
-	OllamaModel    string
+	GitHubToken string
 }
 
 // Server represents the HTTP server for the web interface
 type Server struct {
-	db             *db.Database
-	logger         *logger.Logger
-	server         *http.Server
-	addr           string
-	handler        http.Handler
-	config         ServerConfig
-	ollamaEnabled  bool
-	ollamaEndpoint string
-	ollamaModel    string
+	db      *db.Database
+	logger  *logger.Logger
+	server  *http.Server
+	addr    string
+	handler http.Handler
+	config  ServerConfig
 }
 
 // NewServer creates a new web server instance
 func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *ServerConfig) *Server {
 	s := &Server{
-		db:             database,
-		logger:         logger,
-		addr:           addr,
-		config:         *conf,
-		ollamaEnabled:  conf.OllamaEnabled,
-		ollamaEndpoint: conf.OllamaEndpoint,
-		ollamaModel:    conf.OllamaModel,
+		db:     database,
+		logger: logger,
+		addr:   addr,
+		config: *conf,
 	}
 
 	// Create router with handlers
@@ -59,14 +50,13 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *
 	mux.HandleFunc("/api/user/status", s.localWriteOnly(s.updateUserStatusHandler))
 	mux.HandleFunc("/api/report/repository", s.repositoryReportHandler)
 	mux.HandleFunc("/api/report/user", s.userReportHandler)
-	mux.HandleFunc("/api/analysis/generate", s.localWriteOnly(s.generateOllamaAnalysisHandler))
 
 	s.handler = mux
 	s.server = &http.Server{
 		Addr:         addr,
 		Handler:      s.handler,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 6 * time.Minute,
+		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

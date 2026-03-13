@@ -477,7 +477,6 @@
         }
     </style>
     <script src="/static/js/markdown.js"></script>
-    <script src="/static/js/ollama.js"></script>
     <script>
         // Pass the current sort parameters to JavaScript
         const currentSort = "{{.SortBy}}";
@@ -634,52 +633,8 @@
                                     </div>
                                     <textarea class="report-summary" readonly>${data.report_summary || ''}</textarea>
                                 </div>
-                                <div class="report-section">
-                                    <h3>AI-powered User Analysis</h3>
-                                    ${data.ollama_analysis ? 
-                                        `<div class="markdown-content">${markdownRenderer.render(data.ollama_analysis)}</div>` : 
-                                        `<div>
-                                            <p>No AI analysis available. Generate one with Ollama.</p>
-                                            <button class="generate-analysis-btn" 
-                                                    data-type="user" 
-                                                    data-id="${data.username}">
-                                                Generate Analysis
-                                            </button>
-                                         </div>`
-                                    }
-                                </div>
                             `;
                             reportContent.innerHTML = userReport;
-                            
-                            // Add event listeners to analysis buttons after content is loaded
-                            document.querySelectorAll('.generate-analysis-btn').forEach(btn => {
-                                btn.addEventListener('click', function() {
-                                    const entityType = this.getAttribute('data-type');
-                                    const entityId = this.getAttribute('data-id');
-                                    this.disabled = true;
-                                    this.textContent = 'Generating...';
-                                    
-                                    fetch('/api/analysis/generate', {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({
-                                            entity_type: entityType,
-                                            entity_id: entityId
-                                        })
-                                    })
-                                    .then(response => response.json())
-                                    .then(data => {
-                                        this.parentNode.innerHTML = markdownRenderer.render(data.analysis);
-                                    })
-                                    .catch(err => {
-                                        this.disabled = false;
-                                        this.textContent = 'Generate Analysis';
-                                        alert('Error generating analysis: ' + err.message);
-                                    });
-                                });
-                            });
 
                             document.querySelectorAll('[data-copy-report]').forEach(btn => {
                                 btn.addEventListener('click', async function() {
@@ -760,52 +715,8 @@
                                 ` : ''}
                                 ${filesSection}
                                 ${readmeSection}
-                                <div class="report-section">
-                                    <h3>AI-powered Threat Analysis</h3>
-                                    ${data.ollama_analysis ? 
-                                        `<div class="markdown-content">${markdownRenderer.render(data.ollama_analysis)}</div>` : 
-                                        `<div>
-                                            <p>No AI analysis available. Generate one with Ollama.</p>
-                                            <button class="generate-analysis-btn" 
-                                                    data-type="repo" 
-                                                    data-id="${data.owner}/${data.name}">
-                                                Generate Analysis
-                                            </button>
-                                         </div>`
-                                    }
-                                </div>
                             `;
                             reportContent.innerHTML = repoReport;
-                            
-                            // Add event listeners to analysis buttons after content is loaded
-                            document.querySelectorAll('.generate-analysis-btn').forEach(btn => {
-                                btn.addEventListener('click', function() {
-                                    const entityType = this.getAttribute('data-type');
-                                    const entityId = this.getAttribute('data-id');
-                                    this.disabled = true;
-                                    this.textContent = 'Generating...';
-                                    
-                                    fetch('/api/analysis/generate', {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({
-                                            entity_type: entityType,
-                                            entity_id: entityId
-                                        })
-                                    })
-                                    .then(response => response.json())
-                                    .then(data => {
-                                        this.parentNode.innerHTML = markdownRenderer.render(data.analysis);
-                                    })
-                                    .catch(err => {
-                                        this.disabled = false;
-                                        this.textContent = 'Generate Analysis';
-                                        alert('Error generating analysis: ' + err.message);
-                                    });
-                                });
-                            });
                         })
                         .catch(error => {
                             reportContent.innerHTML = `<div class="error">Error loading report: ${error.message}</div>`;

@@ -12,11 +12,10 @@ import (
 
 // Database wraps an sql.DB and prepared statements.
 type Database struct {
-	db               *sql.DB
-	insertRepoStmt   *sql.Stmt
-	insertUserStmt   *sql.Stmt
-	insertFlagStmt   *sql.Stmt
-	insertOllamaStmt *sql.Stmt
+	db             *sql.DB
+	insertRepoStmt *sql.Stmt
+	insertUserStmt *sql.Stmt
+	insertFlagStmt *sql.Stmt
 }
 
 // QueryRow executes a query that is expected to return at most one row.
@@ -77,11 +76,6 @@ func (d *Database) Close() error {
 			closeErr = errors.Join(closeErr, fmt.Errorf("closing insertFlagStmt: %w", err))
 		}
 	}
-	if d.insertOllamaStmt != nil {
-		if err := d.insertOllamaStmt.Close(); err != nil {
-			closeErr = errors.Join(closeErr, fmt.Errorf("closing insertOllamaStmt: %w", err))
-		}
-	}
 	if d.db != nil {
 		if err := d.db.Close(); err != nil {
 			closeErr = errors.Join(closeErr, fmt.Errorf("closing database: %w", err))
@@ -132,20 +126,6 @@ func (d *Database) createTables() error {
 	if _, err := d.db.Exec(flagTable); err != nil {
 		return fmt.Errorf("creating heuristic_flags table: %w", err)
 	}
-	ollamaTable := `
-	CREATE TABLE IF NOT EXISTS ollama_analyses (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		entity_type TEXT,
-		entity_id TEXT,
-		context TEXT,
-		analysis TEXT,
-		model TEXT,
-		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		UNIQUE(entity_type, entity_id, model)
-	);`
-	if _, err := d.db.Exec(ollamaTable); err != nil {
-		return fmt.Errorf("creating ollama_analyses table: %w", err)
-	}
 	return nil
 }
 
@@ -189,13 +169,6 @@ func (d *Database) prepareStatements() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("preparing insertFlagStmt: %w", err)
-	}
-	d.insertOllamaStmt, err = d.db.Prepare(`
-		INSERT OR REPLACE INTO ollama_analyses (entity_type, entity_id, context, analysis, model)
-		VALUES (?, ?, ?, ?, ?);
-	`)
-	if err != nil {
-		return fmt.Errorf("preparing insertOllamaStmt: %w", err)
 	}
 	return nil
 }
@@ -259,29 +232,4 @@ func (d *Database) WasRepoProcessed(repoID string, updatedAt time.Time) (bool, e
 		return false, fmt.Errorf("querying processed repository: %w", err)
 	}
 	return !updatedAt.After(storedUpdatedAt), nil
-}
-
-// InsertOllamaAnalysis stores an Ollama analysis for an entity
-func (d *Database) InsertOllamaAnalysis(entityType, entityID, context, analysis, model string) error {
-	_, err := d.insertOllamaStmt.Exec(entityType, entityID, context, analysis, model)
-	if err != nil {
-		return fmt.Errorf("inserting ollama analysis: %w", err)
-	}
-	return nil
-}
-
-// GetOllamaAnalysis retrieves an Ollama analysis for an entity if it exists
-func (d *Database) GetOllamaAnalysis(entityType, entityID, model string) (string, error) {
-	var analysis string
-	err := d.db.QueryRow(
-		"SELECT analysis FROM ollama_analyses WHERE entity_type = ? AND entity_id = ? AND model = ?",
-		entityType, entityID, model,
-	).Scan(&analysis)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", nil
-		}
-		return "", fmt.Errorf("querying ollama analysis: %w", err)
-	}
-	return analysis, nil
 }
