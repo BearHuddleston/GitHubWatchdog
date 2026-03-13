@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHubWatchdog CLI"
+  short_description: "Run suspicious GitHub scans with this repo CLI"
+  default_prompt: "Use $githubwatchdog-cli to scan GitHub repositories or users with this repo's CLI and summarize findings."
