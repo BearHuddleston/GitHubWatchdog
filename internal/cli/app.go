@@ -19,7 +19,6 @@ import (
 	"github.com/arkouda/github/GitHubWatchdog/internal/github"
 	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
 	"github.com/arkouda/github/GitHubWatchdog/internal/scan"
-	"github.com/arkouda/github/GitHubWatchdog/internal/web"
 )
 
 const exitCodeFindings = 10
@@ -105,8 +104,6 @@ func Run(args []string, stdout, stderr io.Writer) error {
 
 	configPath := root.String("config", "config.json", "Path to the configuration file")
 	dbPath := root.String("db", "github_watchdog.db", "Path to the SQLite database")
-	legacyWeb := root.Bool("web", false, "Run the web server")
-	legacyAddr := root.String("addr", "127.0.0.1:8080", "Address for the web server")
 	root.Usage = func() {
 		writeUsage(stderr)
 	}
@@ -116,20 +113,6 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return nil
 		}
 		return err
-	}
-
-	if *legacyWeb {
-		cfg, err := loadConfig(*configPath)
-		if err != nil {
-			return err
-		}
-		appLogger := logger.New(cfg.Verbose != nil && *cfg.Verbose)
-		database, err := db.New(*dbPath)
-		if err != nil {
-			return fmt.Errorf("opening database: %w", err)
-		}
-		defer database.Close()
-		return runServeCommand(cfg, database, appLogger, *legacyAddr)
 	}
 
 	command := "search"
@@ -187,16 +170,6 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		defer database.Close()
 		return runCheckpointCommand(commandArgs, stdout, stderr, database)
-	case "serve":
-		if helpRequested(commandArgs) {
-			return runServeSubcommand(commandArgs, stderr, defaultConfig(), nil, logger.New(false))
-		}
-		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
-		if err != nil {
-			return err
-		}
-		defer database.Close()
-		return runServeSubcommand(commandArgs, stderr, cfg, database, appLogger)
 	case "help":
 		writeUsage(stdout)
 		return nil
@@ -583,50 +556,6 @@ func runCheckpointImport(stdout io.Writer, format string, database *db.Database,
 	return writeCheckpointImportResult(stdout, format, len(checkpoints))
 }
 
-func runServeSubcommand(args []string, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-
-	addr := fs.String("addr", "127.0.0.1:8080", "Address to run web server on")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return nil
-		}
-		return err
-	}
-
-	return runServeCommand(cfg, database, appLogger, *addr)
-}
-
-func runServeCommand(cfg *config.Config, database *db.Database, appLogger *logger.Logger, addr string) error {
-	server := web.NewServer(database, addr, appLogger, &web.ServerConfig{
-		GitHubToken: cfg.Token,
-	})
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- server.Start()
-	}()
-
-	appLogger.Info("Web server running at %s", addr)
-	appLogger.Info("Press Ctrl+C to stop")
-
-	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("shutting down server: %w", err)
-		}
-		return nil
-	case err := <-errCh:
-		return err
-	}
-}
-
 func newScanService(cfg *config.Config, database *db.Database, appLogger *logger.Logger) *scan.Service {
 	client := github.NewClient(
 		cfg.Token,
@@ -697,7 +626,6 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  githubwatchdog [global flags] user <username> [scan flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] verdict <owner/repo|username> [verdict flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] checkpoints <list|show|delete|export|import> [args]")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] serve [serve flags]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Global flags:")
 	fmt.Fprintln(w, "  -config string   Path to config file (default: config.json)")
@@ -709,7 +637,6 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  - search --since and --updated-before add validated updated: qualifiers to the GitHub query.")
 	fmt.Fprintln(w, "  - search --profile applies a built-in preset; explicit flags override the preset.")
 	fmt.Fprintln(w, "  - Running with no subcommand defaults to the batch search command.")
-	fmt.Fprintln(w, "  - Legacy web mode is still available via -web and -addr.")
 	fmt.Fprintln(w, "  - Exit code 10 indicates findings when --fail-on-findings is used.")
 }
 

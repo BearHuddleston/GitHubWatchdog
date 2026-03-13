@@ -1,6 +1,6 @@
 # GitHubWatchdog
 
-GitHubWatchdog is a Go CLI for scanning GitHub repositories and users for suspicious or malicious patterns. It can run broad searches, targeted repo or user scans, mixed-target verdict batches, and a local web UI backed by SQLite.
+GitHubWatchdog is a Go CLI for scanning GitHub repositories and users for suspicious or malicious patterns. It can run broad searches, targeted repo or user scans, and mixed-target verdict batches backed by SQLite.
 
 The CLI is designed to be agent-friendly:
 
@@ -53,14 +53,6 @@ Emit a compact verdict instead of the full payload:
 ./githubwatchdog verdict octocat
 ```
 
-Start the local web UI:
-
-```bash
-./githubwatchdog serve
-```
-
-The web server listens on [http://127.0.0.1:8080](http://127.0.0.1:8080) by default.
-
 ## Commands
 
 ```text
@@ -69,7 +61,6 @@ githubwatchdog [global flags] repo <owner>/<repo> [scan flags]
 githubwatchdog [global flags] user <username> [scan flags]
 githubwatchdog [global flags] verdict <owner/repo|username> [verdict flags]
 githubwatchdog [global flags] checkpoints <list|show|delete|export|import> [args]
-githubwatchdog [global flags] serve [serve flags]
 ```
 
 Global flags:
@@ -205,28 +196,6 @@ Example `config.json`:
   "verbose": true
 }
 ```
-
-## Web UI
-
-Start the UI:
-
-```bash
-./githubwatchdog serve
-```
-
-Custom address:
-
-```bash
-./githubwatchdog serve --addr :9090
-```
-
-The web server binds to loopback by default. The UI provides:
-
-- dashboard views for repositories, users, and flags
-- sortable tables and pagination
-- repo and user detail pages
-- manual status toggles
-- README rendering for repository reports
 
 ## Development
 
