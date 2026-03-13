@@ -23,6 +23,16 @@ import (
 
 const exitCodeFindings = 10
 
+type searchProfile struct {
+	Name          string
+	Description   string
+	Query         string
+	Since         string
+	UpdatedBefore string
+	MaxPages      int
+	PerPage       int
+}
+
 type searchNDJSONEvent struct {
 	Type    string           `json:"type"`
 	Result  *scan.RepoReport `json:"result,omitempty"`
@@ -96,7 +106,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 
 	switch command {
 	case "search":
-		if helpRequested(commandArgs) {
+		if helpRequested(commandArgs) || listProfilesRequested(commandArgs) {
 			return runSearchCommand(commandArgs, stdout, stderr, defaultConfig(), nil, logger.New(false))
 		}
 		cfg, database, appLogger, err := openRuntime(*configPath, *dbPath)
@@ -149,6 +159,8 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	fs.SetOutput(stderr)
 
 	query := fs.String("query", cfg.GitHubQuery, "GitHub search query")
+	profileName := fs.String("profile", "", "Built-in search profile: recent, high-signal, or backfill")
+	listProfiles := fs.Bool("list-profiles", false, "List built-in search profiles and exit")
 	since := fs.String("since", "", "Only include repositories updated on or after this date (YYYY-MM-DD or RFC3339)")
 	updatedBefore := fs.String("updated-before", "", "Only include repositories updated on or before this date (YYYY-MM-DD or RFC3339)")
 	maxPages := fs.Int("max-pages", intValue(cfg.MaxPages, 10), "Maximum number of result pages to scan")
@@ -170,8 +182,28 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	if err := validateFormat(*format); err != nil {
 		return err
 	}
+	if *listProfiles {
+		writeSearchProfiles(stdout)
+		return nil
+	}
 
-	effectiveQuery, err := buildSearchQuery(*query, *since, *updatedBefore)
+	profile, err := resolveSearchProfile(*profileName)
+	if err != nil {
+		return err
+	}
+	queryValue := firstNonEmpty(*query, profile.Query, cfg.GitHubQuery)
+	sinceValue := firstNonEmpty(*since, profile.Since)
+	updatedBeforeValue := firstNonEmpty(*updatedBefore, profile.UpdatedBefore)
+	maxPagesValue := *maxPages
+	if !flagPassed(fs, "max-pages") && profile.MaxPages > 0 {
+		maxPagesValue = profile.MaxPages
+	}
+	perPageValue := *perPage
+	if !flagPassed(fs, "per-page") && profile.PerPage > 0 {
+		perPageValue = profile.PerPage
+	}
+
+	effectiveQuery, err := buildSearchQuery(queryValue, sinceValue, updatedBeforeValue)
 	if err != nil {
 		return err
 	}
@@ -185,8 +217,8 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	if *format == "ndjson" {
 		report, reportErr = writeSearchNDJSON(stdout, service, ctx, scan.SearchOptions{
 			Query:         effectiveQuery,
-			MaxPages:      *maxPages,
-			PerPage:       *perPage,
+			MaxPages:      maxPagesValue,
+			PerPage:       perPageValue,
 			MaxConcurrent: *maxConcurrent,
 			Persist:       *persist,
 		}, *onlyFlagged, *includeSkipped)
@@ -196,8 +228,8 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	} else {
 		report, reportErr = service.Search(ctx, scan.SearchOptions{
 			Query:         effectiveQuery,
-			MaxPages:      *maxPages,
-			PerPage:       *perPage,
+			MaxPages:      maxPagesValue,
+			PerPage:       perPageValue,
 			MaxConcurrent: *maxConcurrent,
 			Persist:       *persist,
 		})
@@ -425,6 +457,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
 	fmt.Fprintln(w, "  - search --format ndjson streams result lines plus a final summary line.")
 	fmt.Fprintln(w, "  - search --since and --updated-before add validated updated: qualifiers to the GitHub query.")
+	fmt.Fprintln(w, "  - search --profile applies a built-in preset; explicit flags override the preset.")
 	fmt.Fprintln(w, "  - Running with no subcommand defaults to the batch search command.")
 	fmt.Fprintln(w, "  - Legacy web mode is still available via -web and -addr.")
 	fmt.Fprintln(w, "  - Exit code 10 indicates findings when --fail-on-findings is used.")
@@ -619,6 +652,99 @@ func helpRequested(args []string) bool {
 		}
 	}
 	return false
+}
+
+func listProfilesRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-list-profiles" || arg == "--list-profiles" {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveSearchProfile(name string) (searchProfile, error) {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return searchProfile{}, nil
+	}
+
+	now := time.Now().UTC()
+	profiles := map[string]searchProfile{
+		"recent": {
+			Name:        "recent",
+			Description: "Fresh activity sweep over the last 7 days with a shallow page budget.",
+			Query:       "stars:>5",
+			Since:       now.Add(-7 * 24 * time.Hour).Format(time.DateOnly),
+			MaxPages:    3,
+			PerPage:     100,
+		},
+		"high-signal": {
+			Name:        "high-signal",
+			Description: "Higher-star recent sweep for likely-visible suspicious repos.",
+			Query:       "stars:>20",
+			Since:       now.Add(-30 * 24 * time.Hour).Format(time.DateOnly),
+			MaxPages:    5,
+			PerPage:     100,
+		},
+		"backfill": {
+			Name:          "backfill",
+			Description:   "Historical sweep older than the recent window for broader backlog coverage.",
+			Query:         "stars:>5",
+			UpdatedBefore: now.Add(-7 * 24 * time.Hour).Format(time.DateOnly),
+			MaxPages:      20,
+			PerPage:       100,
+		},
+	}
+
+	profile, ok := profiles[name]
+	if !ok {
+		return searchProfile{}, fmt.Errorf("unknown search profile %q", name)
+	}
+	return profile, nil
+}
+
+func writeSearchProfiles(w io.Writer) {
+	now := time.Now().UTC()
+	_, _ = fmt.Fprintf(w, "Built-in search profiles (generated %s)\n", now.Format(time.RFC3339))
+	for _, name := range []string{"recent", "high-signal", "backfill"} {
+		profile, _ := resolveSearchProfile(name)
+		_, _ = fmt.Fprintf(w, "\n- %s\n", profile.Name)
+		_, _ = fmt.Fprintf(w, "  %s\n", profile.Description)
+		_, _ = fmt.Fprintf(w, "  query=%q", profile.Query)
+		if profile.Since != "" {
+			_, _ = fmt.Fprintf(w, " since=%s", profile.Since)
+		}
+		if profile.UpdatedBefore != "" {
+			_, _ = fmt.Fprintf(w, " updated-before=%s", profile.UpdatedBefore)
+		}
+		if profile.MaxPages > 0 {
+			_, _ = fmt.Fprintf(w, " max-pages=%d", profile.MaxPages)
+		}
+		if profile.PerPage > 0 {
+			_, _ = fmt.Fprintf(w, " per-page=%d", profile.PerPage)
+		}
+		_, _ = fmt.Fprintln(w)
+	}
+}
+
+func flagPassed(fs *flag.FlagSet, name string) bool {
+	passed := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			passed = true
+		}
+	})
+	return passed
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func writeSearchNDJSON(

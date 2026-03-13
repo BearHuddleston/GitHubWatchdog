@@ -129,6 +129,16 @@ For incremental polling, use the validated time filters instead of hand-building
 ./githubwatchdog search --since 2026-03-01 --updated-before 2026-03-13
 ```
 
+For stable canned searches, use a built-in profile:
+
+```bash
+./githubwatchdog search --profile recent
+./githubwatchdog search --profile high-signal --only-flagged
+./githubwatchdog search --list-profiles
+```
+
+Profiles set a default query window and page budget, but any explicit flag still wins.
+
 ### Direct Repository Scan
 
 ```bash
@@ -177,6 +187,8 @@ Options:
 -   `--format ndjson`: Stream one JSON object per line during `search`
 -   `--since`: Add an `updated:>=...` qualifier without editing the raw query
 -   `--updated-before`: Add an `updated:<=...` qualifier without editing the raw query
+-   `--profile`: Apply a built-in `search` preset such as `recent`, `high-signal`, or `backfill`
+-   `--list-profiles`: Print the built-in `search` presets and exit
 
 Example with custom port:
 

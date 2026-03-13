@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/arkouda/github/GitHubWatchdog/internal/scan"
@@ -47,6 +49,18 @@ func TestHelpRequested(t *testing.T) {
 	}
 	if helpRequested([]string{"octocat"}) {
 		t.Fatal("helpRequested(octocat) = true, want false")
+	}
+}
+
+func TestListProfilesRequested(t *testing.T) {
+	if !listProfilesRequested([]string{"--list-profiles"}) {
+		t.Fatal("listProfilesRequested(--list-profiles) = false, want true")
+	}
+	if !listProfilesRequested([]string{"-list-profiles"}) {
+		t.Fatal("listProfilesRequested(-list-profiles) = false, want true")
+	}
+	if listProfilesRequested([]string{"recent"}) {
+		t.Fatal("listProfilesRequested(recent) = true, want false")
 	}
 }
 
@@ -106,5 +120,39 @@ func TestNormalizeSearchDate(t *testing.T) {
 	}
 	if _, err := normalizeSearchDate("03/13/2026"); err == nil {
 		t.Fatal("normalizeSearchDate() expected error for invalid date")
+	}
+}
+
+func TestResolveSearchProfile(t *testing.T) {
+	profile, err := resolveSearchProfile("recent")
+	if err != nil {
+		t.Fatalf("resolveSearchProfile(recent) error = %v", err)
+	}
+	if profile.Name != "recent" {
+		t.Fatalf("resolveSearchProfile(recent).Name = %q", profile.Name)
+	}
+	if profile.Query == "" || profile.Since == "" {
+		t.Fatalf("resolveSearchProfile(recent) = %+v, want populated query/since", profile)
+	}
+	if _, err := resolveSearchProfile("missing"); err == nil {
+		t.Fatal("resolveSearchProfile(missing) expected error")
+	}
+}
+
+func TestFirstNonEmpty(t *testing.T) {
+	if got := firstNonEmpty("", "  ", "value", "later"); got != "value" {
+		t.Fatalf("firstNonEmpty() = %q, want value", got)
+	}
+}
+
+func TestWriteSearchProfiles(t *testing.T) {
+	var buf bytes.Buffer
+	writeSearchProfiles(&buf)
+
+	output := buf.String()
+	for _, needle := range []string{"recent", "high-signal", "backfill"} {
+		if !strings.Contains(output, needle) {
+			t.Fatalf("writeSearchProfiles() missing %q in output: %s", needle, output)
+		}
 	}
 }
