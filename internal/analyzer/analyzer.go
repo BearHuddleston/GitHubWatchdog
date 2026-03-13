@@ -180,7 +180,7 @@ func computeRepoMetrics(repos []models.RepoData) (totalStars, emptyCount, suspic
 
 // EvaluateUserHeuristics evaluates user data against all heuristics
 func EvaluateUserHeuristics(data models.UserData, repos []models.RepoData) ([]models.HeuristicResult, bool) {
-	heuristics := []UserHeuristic{&OriginalHeuristic{}, &NewHeuristic{}, &RecentHeuristic{}}
+	heuristics := []UserHeuristic{&OriginalHeuristic{}, &NewHeuristic{}, &RecentHeuristic{}, &GeneratedPortfolioHeuristic{}}
 	var suspicious bool
 	var results []models.HeuristicResult
 	legitimateActivity := hasLegitimateActivitySignals(data, repos)

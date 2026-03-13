@@ -310,11 +310,11 @@ func searchAndProcessRepositories(
 // processRepository processes a single repository
 func processRepository(
 	ctx context.Context,
-	analyzer *analyzer.Analyzer,
+	repoAnalyzer *analyzer.Analyzer,
 	database *db.Database,
 	item models.RepoItem,
 ) (time.Time, error) {
-	log := analyzer.GetLogger()
+	log := repoAnalyzer.GetLogger()
 
 	repo := models.Repo{
 		Owner:          item.Owner.Login,
@@ -340,12 +340,12 @@ func processRepository(
 
 	// For small repos, analyze the user
 	if repo.DiskUsage < 10 {
-		analysis, err := analyzer.AnalyzeUser(ctx, repo.Owner)
+		analysis, err := repoAnalyzer.AnalyzeUser(ctx, repo.Owner)
 		if err != nil {
 			log.Error("Analyzing user %s: %v", repo.Owner, err)
 		} else {
 			// Insert flags only once per user per process.
-			if !analyzer.IsUserFlagged(repo.Owner) {
+			if !repoAnalyzer.IsUserFlagged(repo.Owner) {
 				for _, hr := range analysis.HeuristicResults {
 					if hr.Flag {
 						flagMsg := fmt.Sprintf("[%s] %s: %s", hr.Category, hr.Name, hr.Description)
@@ -356,7 +356,7 @@ func processRepository(
 						}
 					}
 				}
-				analyzer.MarkUserFlagged(repo.Owner)
+				repoAnalyzer.MarkUserFlagged(repo.Owner)
 			} else {
 				log.Debug("User %s already flagged; skipping flag insertion.", repo.Owner)
 			}
@@ -369,18 +369,30 @@ func processRepository(
 	}
 
 	// Check repository contents for malicious indicators
+	repoData := models.RepoData{
+		Owner: repo.Owner,
+		Name:  repo.Name,
+	}
 	var isMalicious bool
 	if repo.DiskUsage > 0 {
-		_, malicious, err := analyzer.CheckRepoFiles(ctx, repo.Owner, repo.Name, item.DefaultBranch)
+		analyzedRepo, malicious, err := repoAnalyzer.CheckRepoFiles(ctx, repo.Owner, repo.Name, item.DefaultBranch)
 		if err != nil {
 			log.Error("Checking repo files for %s: %v", repoID, err)
 		}
+		repoData = analyzedRepo
 		isMalicious = malicious
 		if isMalicious {
 			log.Info("Repo %s/%s flagged as malicious", repo.Owner, repo.Name)
 		}
 	} else {
 		log.Debug("Skipping file analysis for %s due to low disk usage.", repoID)
+	}
+
+	for _, hr := range analyzer.EvaluateRepoHeuristics(repoData) {
+		flagMsg := fmt.Sprintf("[%s] %s: %s", hr.Category, hr.Name, hr.Description)
+		if err := database.InsertHeuristicFlag("repo", repoID, flagMsg); err != nil {
+			log.Error("Recording flag for repo %s via %s: %v", repoID, hr.Name, err)
+		}
 	}
 
 	// Record the repository in the database

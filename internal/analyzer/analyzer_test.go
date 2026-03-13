@@ -57,3 +57,71 @@ func TestEvaluateUserHeuristicsSuppressesEstablishedContributors(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratedPortfolioHeuristicFlagsRepeatedGeneratedNames(t *testing.T) {
+	data := models.UserData{
+		CreatedAt:     time.Now().Add(-7 * 24 * time.Hour),
+		Contributions: 1,
+	}
+	repos := []models.RepoData{
+		{Name: "WeatherForecast-1409", DiskUsage: 2},
+		{Name: "WeatherForecast-1410", DiskUsage: 4},
+		{Name: "WeatherForecast-1411", DiskUsage: 1},
+		{Name: "TaskManager-5001", DiskUsage: 0},
+		{Name: "TaskManager-5002", DiskUsage: 3},
+	}
+
+	results, suspicious := EvaluateUserHeuristics(data, repos)
+	if !suspicious {
+		t.Fatal("expected repeated generated naming patterns to be suspicious")
+	}
+
+	found := false
+	for _, result := range results {
+		if result.Name == "GeneratedPortfolioHeuristic" && result.Flag {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected GeneratedPortfolioHeuristic to flag repeated generated repo names")
+	}
+}
+
+func TestEvaluateRepoHeuristicsFlagsGeneratedRepoSignals(t *testing.T) {
+	results := EvaluateRepoHeuristics(models.RepoData{
+		Name:        "WeatherForecast-1409",
+		Readme:      "A cool open-source project with AI-generated code.",
+		TreeEntries: []string{"README.md", "main.py"},
+	})
+
+	expected := map[string]bool{
+		"GeneratedRepoNamingHeuristic": false,
+		"BoilerplateReadmeHeuristic":   false,
+		"SparseProjectHeuristic":       false,
+	}
+
+	for _, result := range results {
+		expected[result.Name] = result.Flag
+	}
+
+	for name, flagged := range expected {
+		if !flagged {
+			t.Fatalf("expected %s to flag generated repo signals", name)
+		}
+	}
+}
+
+func TestEvaluateRepoHeuristicsFlagsPromotionSpamReadme(t *testing.T) {
+	results := EvaluateRepoHeuristics(models.RepoData{
+		Name:   "token-hub-3001",
+		Readme: "Join Telegram to claim your airdrop reward now.",
+	})
+
+	for _, result := range results {
+		if result.Name == "PromotionSpamReadmeHeuristic" && result.Flag {
+			return
+		}
+	}
+
+	t.Fatal("expected PromotionSpamReadmeHeuristic to flag incentive-driven README spam")
+}
