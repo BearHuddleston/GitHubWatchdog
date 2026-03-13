@@ -149,6 +149,8 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	fs.SetOutput(stderr)
 
 	query := fs.String("query", cfg.GitHubQuery, "GitHub search query")
+	since := fs.String("since", "", "Only include repositories updated on or after this date (YYYY-MM-DD or RFC3339)")
+	updatedBefore := fs.String("updated-before", "", "Only include repositories updated on or before this date (YYYY-MM-DD or RFC3339)")
 	maxPages := fs.Int("max-pages", intValue(cfg.MaxPages, 10), "Maximum number of result pages to scan")
 	perPage := fs.Int("per-page", intValue(cfg.PerPage, 100), "Repositories to request per page")
 	maxConcurrent := fs.Int("max-concurrent", intValue(cfg.MaxConcurrent, 10), "Maximum concurrent repository analyses")
@@ -169,33 +171,38 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		return err
 	}
 
+	effectiveQuery, err := buildSearchQuery(*query, *since, *updatedBefore)
+	if err != nil {
+		return err
+	}
+
 	service := newScanService(cfg, database, appLogger)
 	ctx, cancel := interruptibleContext(*timeout)
 	defer cancel()
 
 	var report scan.SearchReport
-	var err error
+	var reportErr error
 	if *format == "ndjson" {
-		report, err = writeSearchNDJSON(stdout, service, ctx, scan.SearchOptions{
-			Query:         *query,
+		report, reportErr = writeSearchNDJSON(stdout, service, ctx, scan.SearchOptions{
+			Query:         effectiveQuery,
 			MaxPages:      *maxPages,
 			PerPage:       *perPage,
 			MaxConcurrent: *maxConcurrent,
 			Persist:       *persist,
 		}, *onlyFlagged, *includeSkipped)
-		if err != nil {
-			return err
+		if reportErr != nil {
+			return reportErr
 		}
 	} else {
-		report, err = service.Search(ctx, scan.SearchOptions{
-			Query:         *query,
+		report, reportErr = service.Search(ctx, scan.SearchOptions{
+			Query:         effectiveQuery,
 			MaxPages:      *maxPages,
 			PerPage:       *perPage,
 			MaxConcurrent: *maxConcurrent,
 			Persist:       *persist,
 		})
-		if err != nil {
-			return err
+		if reportErr != nil {
+			return reportErr
 		}
 		if err := writeSearchReport(stdout, *format, report.Filter(*onlyFlagged, *includeSkipped)); err != nil {
 			return err
@@ -417,6 +424,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "Notes:")
 	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
 	fmt.Fprintln(w, "  - search --format ndjson streams result lines plus a final summary line.")
+	fmt.Fprintln(w, "  - search --since and --updated-before add validated updated: qualifiers to the GitHub query.")
 	fmt.Fprintln(w, "  - Running with no subcommand defaults to the batch search command.")
 	fmt.Fprintln(w, "  - Legacy web mode is still available via -web and -addr.")
 	fmt.Fprintln(w, "  - Exit code 10 indicates findings when --fail-on-findings is used.")
@@ -541,6 +549,43 @@ func validateFormat(format string) error {
 	default:
 		return fmt.Errorf("invalid format %q: expected json, ndjson, or text", format)
 	}
+}
+
+func buildSearchQuery(baseQuery, since, updatedBefore string) (string, error) {
+	query := strings.TrimSpace(baseQuery)
+	if (since != "" || updatedBefore != "") && strings.Contains(strings.ToLower(query), "updated:") {
+		return "", errors.New("cannot combine --since/--updated-before with a query that already includes updated:")
+	}
+
+	if since != "" {
+		normalized, err := normalizeSearchDate(since)
+		if err != nil {
+			return "", fmt.Errorf("invalid --since value: %w", err)
+		}
+		query = strings.TrimSpace(query + " updated:>=" + normalized)
+	}
+	if updatedBefore != "" {
+		normalized, err := normalizeSearchDate(updatedBefore)
+		if err != nil {
+			return "", fmt.Errorf("invalid --updated-before value: %w", err)
+		}
+		query = strings.TrimSpace(query + " updated:<=" + normalized)
+	}
+
+	return query, nil
+}
+
+func normalizeSearchDate(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	for _, layout := range []string{time.DateOnly, time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			if layout == time.DateOnly {
+				return parsed.Format(time.DateOnly), nil
+			}
+			return parsed.UTC().Format(time.RFC3339), nil
+		}
+	}
+	return "", fmt.Errorf("expected YYYY-MM-DD or RFC3339, got %q", value)
 }
 
 func parseRepoRef(value string) (string, string, error) {

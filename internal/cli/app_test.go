@@ -79,3 +79,32 @@ func TestShouldEmitSearchResult(t *testing.T) {
 		t.Fatal("clean result should be emitted when filters allow it")
 	}
 }
+
+func TestBuildSearchQuery(t *testing.T) {
+	query, err := buildSearchQuery("stars:>5", "2026-03-01", "2026-03-13")
+	if err != nil {
+		t.Fatalf("buildSearchQuery() error = %v", err)
+	}
+	want := "stars:>5 updated:>=2026-03-01 updated:<=2026-03-13"
+	if query != want {
+		t.Fatalf("buildSearchQuery() = %q, want %q", query, want)
+	}
+}
+
+func TestBuildSearchQueryRejectsDuplicateUpdatedQualifier(t *testing.T) {
+	if _, err := buildSearchQuery("stars:>5 updated:>=2026-03-01", "2026-03-02", ""); err == nil {
+		t.Fatal("buildSearchQuery() expected error when query already contains updated:")
+	}
+}
+
+func TestNormalizeSearchDate(t *testing.T) {
+	if got, err := normalizeSearchDate("2026-03-13"); err != nil || got != "2026-03-13" {
+		t.Fatalf("normalizeSearchDate(date) = %q, %v", got, err)
+	}
+	if got, err := normalizeSearchDate("2026-03-13T12:34:56-05:00"); err != nil || got != "2026-03-13T17:34:56Z" {
+		t.Fatalf("normalizeSearchDate(rfc3339) = %q, %v", got, err)
+	}
+	if _, err := normalizeSearchDate("03/13/2026"); err == nil {
+		t.Fatal("normalizeSearchDate() expected error for invalid date")
+	}
+}

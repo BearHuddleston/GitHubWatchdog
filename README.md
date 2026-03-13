@@ -123,6 +123,12 @@ For long-running scans, use streaming output:
 
 That emits one result per line as the scan progresses, followed by a final summary line.
 
+For incremental polling, use the validated time filters instead of hand-building `updated:` query fragments:
+
+```bash
+./githubwatchdog search --since 2026-03-01 --updated-before 2026-03-13
+```
+
 ### Direct Repository Scan
 
 ```bash
@@ -169,6 +175,8 @@ Options:
 -   `--include-skipped=false`: Exclude already-processed repositories from `search` output
 -   `--fail-on-findings`: Exit with code `10` when suspicious results are found
 -   `--format ndjson`: Stream one JSON object per line during `search`
+-   `--since`: Add an `updated:>=...` qualifier without editing the raw query
+-   `--updated-before`: Add an `updated:<=...` qualifier without editing the raw query
 
 Example with custom port:
 
