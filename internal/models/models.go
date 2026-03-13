@@ -75,17 +75,3 @@ type HeuristicResult struct {
 	Name        string
 	Description string
 }
-
-// CacheEntry represents a cached API response
-type CacheEntry struct {
-	Data      []byte
-	Timestamp time.Time
-}
-
-// QueryParams holds global parameters for API queries
-type QueryParams struct {
-	APICache    interface{} // Will be APICache in github package
-	RateLimiter interface{} // Will be RateLimiter in github package
-	Token       string
-	CacheTTL    time.Duration
-}

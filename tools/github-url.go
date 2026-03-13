@@ -2,27 +2,27 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-// Should turn this into arguments
-const (
-	inputPath  = "malicious_stargazers.txt"
-	outputPath = "./bark/malicious_stargazers/README.md"
-)
-
-func ProcessSuspiciousUsers(inputPath, outputPath string) error {
+func processSuspiciousUsers(inputPath, outputPath string) error {
 	inputFile, err := os.Open(inputPath)
 	if err != nil {
-		return fmt.Errorf("failed to open input file: %w", err)
+		return fmt.Errorf("opening input file: %w", err)
 	}
 	defer inputFile.Close()
 
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+
 	outputFile, err := os.Create(outputPath)
 	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
+		return fmt.Errorf("creating output file: %w", err)
 	}
 	defer outputFile.Close()
 
@@ -35,24 +35,28 @@ func ProcessSuspiciousUsers(inputPath, outputPath string) error {
 		if line == "" {
 			continue
 		}
-		fullURL := "1. [" + line + "](https://github.com/" + line + ")"
-		_, err := writer.WriteString(fullURL + "\n")
-		if err != nil {
-			return fmt.Errorf("failed to write to output file: %w", err)
+
+		if _, err := fmt.Fprintf(writer, "1. [%s](https://github.com/%s)\n", line, line); err != nil {
+			return fmt.Errorf("writing output line: %w", err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading input file: %w", err)
+		return fmt.Errorf("reading input file: %w", err)
 	}
+
 	return nil
 }
 
-// Example usage
 func main() {
-	if err := ProcessSuspiciousUsers(inputPath, outputPath); err != nil {
+	inputPath := flag.String("input", "malicious_stargazers.txt", "Path to the newline-delimited username list")
+	outputPath := flag.String("output", "./bark/malicious_stargazers/README.md", "Path to write the generated Markdown list")
+	flag.Parse()
+
+	if err := processSuspiciousUsers(*inputPath, *outputPath); err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
 	}
-	fmt.Println("Parsed URLs written to", outputPath)
+
+	fmt.Println("Parsed URLs written to", *outputPath)
 }

@@ -46,16 +46,6 @@ func (c *Client) GetLogger() *logger.Logger {
 	return c.logger
 }
 
-// QueryParams gets the client's query parameters
-func (c *Client) QueryParams() *models.QueryParams {
-	return &models.QueryParams{
-		APICache:    c.apiCache,
-		RateLimiter: c.rateLimiter,
-		Token:       c.token,
-		CacheTTL:    c.cacheTTL,
-	}
-}
-
 // SearchRepositories searches for repositories using the GitHub search API
 func (c *Client) SearchRepositories(ctx context.Context, query string, page, perPage int) (*models.SearchResult, error) {
 	// First check if context is already canceled
@@ -245,20 +235,24 @@ func (c *Client) GetUserRepositories(ctx context.Context, username string) ([]mo
 			if err != nil {
 				return nil, err
 			}
-			defer resp.Body.Close()
 
 			// Update rate limits
 			c.rateLimiter.UpdateFromResponse(resp)
 
 			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
 				return nil, fmt.Errorf("failed to fetch user repos: %s - Body: %s", resp.Status, string(bodyBytes))
 			}
 
 			// Read response body
 			responseBody, err = io.ReadAll(resp.Body)
+			closeErr := resp.Body.Close()
 			if err != nil {
 				return nil, fmt.Errorf("reading response body: %w", err)
+			}
+			if closeErr != nil {
+				return nil, fmt.Errorf("closing response body: %w", closeErr)
 			}
 
 			// Cache the response

@@ -45,7 +45,7 @@ GitHubWatchdog performs the following tasks:
     Creates an authenticated GitHub client using a personal access token (see `internal/github/client.go`).
 
 -   **Repository Search & Processing:**  
-    Uses GitHub's REST API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are dispatched to a worker pool for concurrent processing (see `internal/processor/processor.go`).
+    Uses GitHub's REST API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are processed concurrently in the main search loop (`cmd/app/main.go`).
 
 -   **Processed Repository Tracking:**  
     The service tracks processed repositories and users in an SQLite database (`github_watchdog.db`) to avoid duplicate analysis. Database interactions are handled by `internal/db/sqlite.go`.
@@ -74,8 +74,6 @@ GitHubWatchdog performs the following tasks:
 -   **Dependencies:**  
     The project uses several Go packages including:
 
-    -   `golang.org/x/oauth2`
-    -   `github.com/shurcooL/githubv4`
     -   `github.com/mattn/go-sqlite3`
 
     Dependencies are managed via Go modules. Use `go mod tidy` to ensure all dependencies are fetched.
@@ -105,7 +103,7 @@ go build -o githubwatchdog ./cmd/app
 ./githubwatchdog -web
 ```
 
-The web server runs on port 8080 by default. You can access it at http://localhost:8080
+The web server listens on `127.0.0.1:8080` by default. You can access it at http://127.0.0.1:8080
 
 The web interface includes the following features:
 
@@ -123,7 +121,7 @@ The web interface includes the following features:
 Options:
 
 -   `-web`: Run in web interface mode
--   `-addr`: Specify the web server address (default: ":8080")
+-   `-addr`: Specify the web server address (default: `"127.0.0.1:8080"`)
 
 Example with custom port:
 
