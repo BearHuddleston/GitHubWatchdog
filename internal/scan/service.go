@@ -21,7 +21,11 @@ type Service struct {
 
 // SearchOptions controls batch repository scanning.
 type SearchOptions struct {
+	ProfileName   string
+	BaseQuery     string
 	Query         string
+	Since         string
+	UpdatedBefore string
 	MaxPages      int
 	PerPage       int
 	MaxConcurrent int
@@ -43,7 +47,11 @@ type UserOptions struct {
 
 // SearchReport is the machine-readable output from a search scan.
 type SearchReport struct {
+	ProfileName     string       `json:"profile_name,omitempty"`
+	BaseQuery       string       `json:"base_query,omitempty"`
 	Query           string       `json:"query"`
+	Since           string       `json:"since,omitempty"`
+	UpdatedBefore   string       `json:"updated_before,omitempty"`
 	StartedAt       time.Time    `json:"started_at"`
 	CompletedAt     time.Time    `json:"completed_at"`
 	OldestUpdatedAt time.Time    `json:"oldest_updated_at,omitempty"`
@@ -101,8 +109,12 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) (SearchReport,
 // SearchStream scans repositories and invokes onResult for each completed repository report.
 func (s *Service) SearchStream(ctx context.Context, opts SearchOptions, onResult func(RepoReport) error) (SearchReport, error) {
 	report := SearchReport{
-		Query:     opts.Query,
-		StartedAt: time.Now().UTC(),
+		ProfileName:   opts.ProfileName,
+		BaseQuery:     opts.BaseQuery,
+		Query:         opts.Query,
+		Since:         opts.Since,
+		UpdatedBefore: opts.UpdatedBefore,
+		StartedAt:     time.Now().UTC(),
 	}
 
 	opts = normalizeSearchOptions(opts)

@@ -95,3 +95,34 @@ func TestSearchReportFilter(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchReportFilterPreservesMetadata(t *testing.T) {
+	report := SearchReport{
+		ProfileName:   "recent",
+		BaseQuery:     "stars:>5",
+		Query:         "stars:>5 updated:>=2026-03-06",
+		Since:         "2026-03-06",
+		UpdatedBefore: "2026-03-13",
+		Results: []RepoReport{
+			{RepoID: "flagged/repo", IsMalicious: true},
+			{RepoID: "clean/repo"},
+		},
+	}
+
+	filtered := report.Filter(true, true)
+	if len(filtered.Results) != 1 {
+		t.Fatalf("Filter(true, true) len = %d, want 1", len(filtered.Results))
+	}
+	if filtered.ProfileName != "recent" {
+		t.Fatalf("ProfileName = %q, want recent", filtered.ProfileName)
+	}
+	if filtered.BaseQuery != "stars:>5" {
+		t.Fatalf("BaseQuery = %q, want stars:>5", filtered.BaseQuery)
+	}
+	if filtered.Query != "stars:>5 updated:>=2026-03-06" {
+		t.Fatalf("Query = %q", filtered.Query)
+	}
+	if filtered.Since != "2026-03-06" || filtered.UpdatedBefore != "2026-03-13" {
+		t.Fatalf("date metadata not preserved: %+v", filtered)
+	}
+}

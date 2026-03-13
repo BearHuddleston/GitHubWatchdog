@@ -139,6 +139,8 @@ For stable canned searches, use a built-in profile:
 
 Profiles set a default query window and page budget, but any explicit flag still wins.
 
+Search output now carries the selected profile, base query, effective query, and any `since` / `updated-before` values so an agent can log exactly what was executed.
+
 ### Direct Repository Scan
 
 ```bash

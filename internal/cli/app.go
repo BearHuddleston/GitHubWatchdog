@@ -40,7 +40,11 @@ type searchNDJSONEvent struct {
 }
 
 type searchSummary struct {
+	ProfileName     string    `json:"profile_name,omitempty"`
+	BaseQuery       string    `json:"base_query,omitempty"`
 	Query           string    `json:"query"`
+	Since           string    `json:"since,omitempty"`
+	UpdatedBefore   string    `json:"updated_before,omitempty"`
 	StartedAt       time.Time `json:"started_at"`
 	CompletedAt     time.Time `json:"completed_at"`
 	OldestUpdatedAt time.Time `json:"oldest_updated_at,omitempty"`
@@ -207,6 +211,17 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	if err != nil {
 		return err
 	}
+	searchOpts := scan.SearchOptions{
+		ProfileName:   profile.Name,
+		BaseQuery:     queryValue,
+		Query:         effectiveQuery,
+		Since:         sinceValue,
+		UpdatedBefore: updatedBeforeValue,
+		MaxPages:      maxPagesValue,
+		PerPage:       perPageValue,
+		MaxConcurrent: *maxConcurrent,
+		Persist:       *persist,
+	}
 
 	service := newScanService(cfg, database, appLogger)
 	ctx, cancel := interruptibleContext(*timeout)
@@ -215,24 +230,12 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	var report scan.SearchReport
 	var reportErr error
 	if *format == "ndjson" {
-		report, reportErr = writeSearchNDJSON(stdout, service, ctx, scan.SearchOptions{
-			Query:         effectiveQuery,
-			MaxPages:      maxPagesValue,
-			PerPage:       perPageValue,
-			MaxConcurrent: *maxConcurrent,
-			Persist:       *persist,
-		}, *onlyFlagged, *includeSkipped)
+		report, reportErr = writeSearchNDJSON(stdout, service, ctx, searchOpts, *onlyFlagged, *includeSkipped)
 		if reportErr != nil {
 			return reportErr
 		}
 	} else {
-		report, reportErr = service.Search(ctx, scan.SearchOptions{
-			Query:         effectiveQuery,
-			MaxPages:      maxPagesValue,
-			PerPage:       perPageValue,
-			MaxConcurrent: *maxConcurrent,
-			Persist:       *persist,
-		})
+		report, reportErr = service.Search(ctx, searchOpts)
 		if reportErr != nil {
 			return reportErr
 		}
@@ -773,7 +776,11 @@ func writeSearchNDJSON(
 	return report, writeCompactJSON(w, searchNDJSONEvent{
 		Type: "summary",
 		Summary: &searchSummary{
+			ProfileName:     report.ProfileName,
+			BaseQuery:       report.BaseQuery,
 			Query:           report.Query,
+			Since:           report.Since,
+			UpdatedBefore:   report.UpdatedBefore,
 			StartedAt:       report.StartedAt,
 			CompletedAt:     report.CompletedAt,
 			OldestUpdatedAt: report.OldestUpdatedAt,
