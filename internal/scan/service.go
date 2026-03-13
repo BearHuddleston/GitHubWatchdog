@@ -9,7 +9,6 @@ import (
 	"github.com/arkouda/github/GitHubWatchdog/internal/analyzer"
 	"github.com/arkouda/github/GitHubWatchdog/internal/db"
 	"github.com/arkouda/github/GitHubWatchdog/internal/github"
-	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
 	"github.com/arkouda/github/GitHubWatchdog/internal/models"
 )
 
@@ -18,7 +17,6 @@ type Service struct {
 	client   *github.Client
 	analyzer *analyzer.Analyzer
 	db       *db.Database
-	logger   *logger.Logger
 }
 
 // SearchOptions controls batch repository scanning.
@@ -92,28 +90,23 @@ func NewService(client *github.Client, database *db.Database) *Service {
 		client:   client,
 		analyzer: analyzer.New(client),
 		db:       database,
-		logger:   client.GetLogger(),
 	}
 }
 
 // Search scans repositories matching the provided search query.
 func (s *Service) Search(ctx context.Context, opts SearchOptions) (SearchReport, error) {
+	return s.SearchStream(ctx, opts, nil)
+}
+
+// SearchStream scans repositories and invokes onResult for each completed repository report.
+func (s *Service) SearchStream(ctx context.Context, opts SearchOptions, onResult func(RepoReport) error) (SearchReport, error) {
 	report := SearchReport{
 		Query:     opts.Query,
 		StartedAt: time.Now().UTC(),
 	}
 
-	if opts.MaxPages <= 0 {
-		opts.MaxPages = 1
-	}
-	if opts.PerPage <= 0 {
-		opts.PerPage = 100
-	}
-	if opts.MaxConcurrent <= 0 {
-		opts.MaxConcurrent = 10
-	}
+	opts = normalizeSearchOptions(opts)
 
-	var mu sync.Mutex
 	for page := 1; page <= opts.MaxPages; page++ {
 		result, err := s.client.SearchRepositories(ctx, opts.Query, page, opts.PerPage)
 		if err != nil {
@@ -123,36 +116,11 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) (SearchReport,
 			break
 		}
 
-		sem := make(chan struct{}, opts.MaxConcurrent)
-		pageResults := make([]RepoReport, 0, len(result.Items))
-		var wg sync.WaitGroup
-
-		for _, item := range result.Items {
-			item := item
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				repoReport := s.scanRepoItem(ctx, item, RepoOptions{
-					Persist:          opts.Persist,
-					SkipIfUnchanged:  true,
-					AnalyzeOwner:     true,
-					OwnerIfSmallOnly: true,
-				})
-
-				mu.Lock()
-				pageResults = append(pageResults, repoReport)
-				if report.OldestUpdatedAt.IsZero() || item.UpdatedAt.Before(report.OldestUpdatedAt) {
-					report.OldestUpdatedAt = item.UpdatedAt
-				}
-				mu.Unlock()
-			}()
-		}
-
-		wg.Wait()
+		pageResults, err := s.processSearchPage(ctx, result.Items, opts, onResult, &report)
 		report.Results = append(report.Results, pageResults...)
+		if err != nil {
+			return report, err
+		}
 
 		if len(result.Items) < opts.PerPage {
 			break
@@ -161,6 +129,77 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) (SearchReport,
 
 	report.CompletedAt = time.Now().UTC()
 	return report, nil
+}
+
+func normalizeSearchOptions(opts SearchOptions) SearchOptions {
+	if opts.MaxPages <= 0 {
+		opts.MaxPages = 1
+	}
+	if opts.PerPage <= 0 {
+		opts.PerPage = 100
+	}
+	if opts.MaxConcurrent <= 0 {
+		opts.MaxConcurrent = 10
+	}
+	return opts
+}
+
+func (s *Service) processSearchPage(
+	ctx context.Context,
+	items []models.RepoItem,
+	opts SearchOptions,
+	onResult func(RepoReport) error,
+	report *SearchReport,
+) ([]RepoReport, error) {
+	type pageResult struct {
+		report RepoReport
+	}
+
+	resultsCh := make(chan pageResult, len(items))
+	sem := make(chan struct{}, opts.MaxConcurrent)
+	var wg sync.WaitGroup
+
+	for _, item := range items {
+		item := item
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			resultsCh <- pageResult{
+				report: s.scanRepoItem(ctx, item, RepoOptions{
+					Persist:          opts.Persist,
+					SkipIfUnchanged:  true,
+					AnalyzeOwner:     true,
+					OwnerIfSmallOnly: true,
+				}),
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	pageResults := make([]RepoReport, 0, len(items))
+	var callbackErr error
+	for result := range resultsCh {
+		pageResults = append(pageResults, result.report)
+		if report.OldestUpdatedAt.IsZero() || result.report.UpdatedAt.Before(report.OldestUpdatedAt) {
+			report.OldestUpdatedAt = result.report.UpdatedAt
+		}
+		if callbackErr == nil && onResult != nil {
+			callbackErr = onResult(result.report)
+		}
+	}
+
+	if callbackErr != nil {
+		return pageResults, callbackErr
+	}
+
+	return pageResults, nil
 }
 
 // ScanRepository scans a specific repository by owner/name.

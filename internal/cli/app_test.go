@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"testing"
+
+	"github.com/arkouda/github/GitHubWatchdog/internal/scan"
 )
 
 func TestParseRepoRef(t *testing.T) {
@@ -27,6 +29,9 @@ func TestValidateFormat(t *testing.T) {
 	}
 	if err := validateFormat("text"); err != nil {
 		t.Fatalf("validateFormat(text) error = %v", err)
+	}
+	if err := validateFormat("ndjson"); err != nil {
+		t.Fatalf("validateFormat(ndjson) error = %v", err)
 	}
 	if err := validateFormat("yaml"); err == nil {
 		t.Fatal("validateFormat(yaml) expected error")
@@ -53,5 +58,24 @@ func TestExitErrorCarriesExitCode(t *testing.T) {
 	}
 	if withCode.ExitCode() != exitCodeFindings {
 		t.Fatalf("ExitCode() = %d, want %d", withCode.ExitCode(), exitCodeFindings)
+	}
+}
+
+func TestShouldEmitSearchResult(t *testing.T) {
+	flagged := scan.RepoReport{RepoID: "flagged/repo", IsMalicious: true}
+	skipped := scan.RepoReport{RepoID: "skipped/repo", Skipped: true}
+	clean := scan.RepoReport{RepoID: "clean/repo"}
+
+	if !shouldEmitSearchResult(flagged, true, false) {
+		t.Fatal("flagged result should be emitted when onlyFlagged is true")
+	}
+	if shouldEmitSearchResult(clean, true, true) {
+		t.Fatal("clean result should not be emitted when onlyFlagged is true")
+	}
+	if shouldEmitSearchResult(skipped, false, false) {
+		t.Fatal("skipped result should not be emitted when includeSkipped is false")
+	}
+	if !shouldEmitSearchResult(clean, false, false) {
+		t.Fatal("clean result should be emitted when filters allow it")
 	}
 }

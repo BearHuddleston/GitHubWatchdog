@@ -115,6 +115,14 @@ For agent workflows, these flags are the important ones:
 
 That keeps the JSON payload focused on suspicious results and exits with code `10` when findings are present.
 
+For long-running scans, use streaming output:
+
+```bash
+./githubwatchdog search --format ndjson --only-flagged
+```
+
+That emits one result per line as the scan progresses, followed by a final summary line.
+
 ### Direct Repository Scan
 
 ```bash
@@ -160,6 +168,7 @@ Options:
 -   `--only-flagged`: Limit `search` output to repositories with findings
 -   `--include-skipped=false`: Exclude already-processed repositories from `search` output
 -   `--fail-on-findings`: Exit with code `10` when suspicious results are found
+-   `--format ndjson`: Stream one JSON object per line during `search`
 
 Example with custom port:
 

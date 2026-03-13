@@ -23,6 +23,23 @@ import (
 
 const exitCodeFindings = 10
 
+type searchNDJSONEvent struct {
+	Type    string           `json:"type"`
+	Result  *scan.RepoReport `json:"result,omitempty"`
+	Summary *searchSummary   `json:"summary,omitempty"`
+}
+
+type searchSummary struct {
+	Query           string    `json:"query"`
+	StartedAt       time.Time `json:"started_at"`
+	CompletedAt     time.Time `json:"completed_at"`
+	OldestUpdatedAt time.Time `json:"oldest_updated_at,omitempty"`
+	TotalCount      int       `json:"total_count"`
+	AnalyzedCount   int       `json:"analyzed_count"`
+	FlaggedCount    int       `json:"flagged_count"`
+	EmittedCount    int       `json:"emitted_count"`
+}
+
 type exitError struct {
 	code    int
 	message string
@@ -137,7 +154,7 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	maxConcurrent := fs.Int("max-concurrent", intValue(cfg.MaxConcurrent, 10), "Maximum concurrent repository analyses")
 	timeout := fs.Duration("timeout", 60*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
-	format := fs.String("format", "json", "Output format: json or text")
+	format := fs.String("format", "json", "Output format: json, ndjson, or text")
 	onlyFlagged := fs.Bool("only-flagged", false, "Only include flagged repositories in output")
 	includeSkipped := fs.Bool("include-skipped", true, "Include skipped repositories in output")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
@@ -156,19 +173,33 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	ctx, cancel := interruptibleContext(*timeout)
 	defer cancel()
 
-	report, err := service.Search(ctx, scan.SearchOptions{
-		Query:         *query,
-		MaxPages:      *maxPages,
-		PerPage:       *perPage,
-		MaxConcurrent: *maxConcurrent,
-		Persist:       *persist,
-	})
-	if err != nil {
-		return err
-	}
-
-	if err := writeSearchReport(stdout, *format, report.Filter(*onlyFlagged, *includeSkipped)); err != nil {
-		return err
+	var report scan.SearchReport
+	var err error
+	if *format == "ndjson" {
+		report, err = writeSearchNDJSON(stdout, service, ctx, scan.SearchOptions{
+			Query:         *query,
+			MaxPages:      *maxPages,
+			PerPage:       *perPage,
+			MaxConcurrent: *maxConcurrent,
+			Persist:       *persist,
+		}, *onlyFlagged, *includeSkipped)
+		if err != nil {
+			return err
+		}
+	} else {
+		report, err = service.Search(ctx, scan.SearchOptions{
+			Query:         *query,
+			MaxPages:      *maxPages,
+			PerPage:       *perPage,
+			MaxConcurrent: *maxConcurrent,
+			Persist:       *persist,
+		})
+		if err != nil {
+			return err
+		}
+		if err := writeSearchReport(stdout, *format, report.Filter(*onlyFlagged, *includeSkipped)); err != nil {
+			return err
+		}
 	}
 	if *failOnFindings && report.FlaggedCount() > 0 {
 		return exitError{code: exitCodeFindings}
@@ -182,7 +213,7 @@ func runRepoCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
-	format := fs.String("format", "json", "Output format: json or text")
+	format := fs.String("format", "json", "Output format: json, ndjson, or text")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
@@ -231,7 +262,7 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 
 	timeout := fs.Duration("timeout", 5*time.Minute, "Overall command timeout")
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
-	format := fs.String("format", "json", "Output format: json or text")
+	format := fs.String("format", "json", "Output format: json, ndjson, or text")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
@@ -385,6 +416,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Notes:")
 	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
+	fmt.Fprintln(w, "  - search --format ndjson streams result lines plus a final summary line.")
 	fmt.Fprintln(w, "  - Running with no subcommand defaults to the batch search command.")
 	fmt.Fprintln(w, "  - Legacy web mode is still available via -web and -addr.")
 	fmt.Fprintln(w, "  - Exit code 10 indicates findings when --fail-on-findings is used.")
@@ -394,6 +426,8 @@ func writeSearchReport(w io.Writer, format string, report scan.SearchReport) err
 	switch format {
 	case "json":
 		return writeJSON(w, report)
+	case "ndjson":
+		return writeCompactJSON(w, report)
 	case "text":
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("Query: %s\n", report.Query))
@@ -436,6 +470,8 @@ func writeRepoReport(w io.Writer, format string, report scan.RepoReport) error {
 	switch format {
 	case "json":
 		return writeJSON(w, report)
+	case "ndjson":
+		return writeCompactJSON(w, report)
 	case "text":
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("Repository: %s\n", report.RepoID))
@@ -494,12 +530,16 @@ func writeJSON(w io.Writer, value interface{}) error {
 	return enc.Encode(value)
 }
 
+func writeCompactJSON(w io.Writer, value interface{}) error {
+	return json.NewEncoder(w).Encode(value)
+}
+
 func validateFormat(format string) error {
 	switch format {
-	case "json", "text":
+	case "json", "text", "ndjson":
 		return nil
 	default:
-		return fmt.Errorf("invalid format %q: expected json or text", format)
+		return fmt.Errorf("invalid format %q: expected json, ndjson, or text", format)
 	}
 }
 
@@ -534,4 +574,52 @@ func helpRequested(args []string) bool {
 		}
 	}
 	return false
+}
+
+func writeSearchNDJSON(
+	w io.Writer,
+	service *scan.Service,
+	ctx context.Context,
+	opts scan.SearchOptions,
+	onlyFlagged bool,
+	includeSkipped bool,
+) (scan.SearchReport, error) {
+	emittedCount := 0
+	report, err := service.SearchStream(ctx, opts, func(result scan.RepoReport) error {
+		if !shouldEmitSearchResult(result, onlyFlagged, includeSkipped) {
+			return nil
+		}
+		emittedCount++
+		return writeCompactJSON(w, searchNDJSONEvent{
+			Type:   "result",
+			Result: &result,
+		})
+	})
+	if err != nil {
+		return report, err
+	}
+
+	return report, writeCompactJSON(w, searchNDJSONEvent{
+		Type: "summary",
+		Summary: &searchSummary{
+			Query:           report.Query,
+			StartedAt:       report.StartedAt,
+			CompletedAt:     report.CompletedAt,
+			OldestUpdatedAt: report.OldestUpdatedAt,
+			TotalCount:      len(report.Results),
+			AnalyzedCount:   report.AnalyzedCount(),
+			FlaggedCount:    report.FlaggedCount(),
+			EmittedCount:    emittedCount,
+		},
+	})
+}
+
+func shouldEmitSearchResult(result scan.RepoReport, onlyFlagged, includeSkipped bool) bool {
+	if !includeSkipped && result.Skipped {
+		return false
+	}
+	if onlyFlagged && !result.IsFlagged() {
+		return false
+	}
+	return true
 }
