@@ -150,6 +150,14 @@ For long-running backfills, save and resume a named checkpoint:
 
 The resumed run reuses the saved scan metadata and continues from the stored `next_updated_before` cursor unless you override it explicitly with flags.
 
+Checkpoint state is manageable from the CLI:
+
+```bash
+./githubwatchdog checkpoints list
+./githubwatchdog checkpoints show backlog
+./githubwatchdog checkpoints delete backlog
+```
+
 ### Direct Repository Scan
 
 ```bash
@@ -202,6 +210,7 @@ Options:
 -   `--list-profiles`: Print the built-in `search` presets and exit
 -   `--checkpoint`: Save the effective search metadata and next resume cursor under a name
 -   `--resume`: Reload defaults from the named checkpoint before applying explicit flags
+-   `checkpoints list|show|delete`: Inspect or prune saved search checkpoints
 
 Example with custom port:
 

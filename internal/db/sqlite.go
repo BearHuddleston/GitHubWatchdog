@@ -321,3 +321,54 @@ func (d *Database) GetSearchCheckpoint(name string) (SearchCheckpoint, error) {
 	}
 	return checkpoint, nil
 }
+
+// ListSearchCheckpoints returns all stored search checkpoints ordered by name.
+func (d *Database) ListSearchCheckpoints() ([]SearchCheckpoint, error) {
+	rows, err := d.db.Query(`
+		SELECT name, profile_name, base_query, effective_query, since, updated_before, next_updated_before, oldest_updated_at, completed_at
+		FROM search_checkpoints
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("querying search checkpoints: %w", err)
+	}
+	defer rows.Close()
+
+	checkpoints := make([]SearchCheckpoint, 0)
+	for rows.Next() {
+		var checkpoint SearchCheckpoint
+		if err := rows.Scan(
+			&checkpoint.Name,
+			&checkpoint.ProfileName,
+			&checkpoint.BaseQuery,
+			&checkpoint.EffectiveQuery,
+			&checkpoint.Since,
+			&checkpoint.UpdatedBefore,
+			&checkpoint.NextUpdatedBefore,
+			&checkpoint.OldestUpdatedAt,
+			&checkpoint.CompletedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scanning search checkpoint: %w", err)
+		}
+		checkpoints = append(checkpoints, checkpoint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating search checkpoints: %w", err)
+	}
+	return checkpoints, nil
+}
+
+// DeleteSearchCheckpoint removes a named search checkpoint.
+func (d *Database) DeleteSearchCheckpoint(name string) error {
+	result, err := d.db.Exec(`DELETE FROM search_checkpoints WHERE name = ?`, name)
+	if err != nil {
+		return fmt.Errorf("deleting search checkpoint: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking deleted checkpoint rows: %w", err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("search checkpoint %q not found", name)
+	}
+	return nil
+}

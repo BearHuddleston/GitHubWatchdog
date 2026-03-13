@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arkouda/github/GitHubWatchdog/internal/db"
 	"github.com/arkouda/github/GitHubWatchdog/internal/scan"
 )
 
@@ -165,5 +166,38 @@ func TestNextUpdatedBefore(t *testing.T) {
 	}
 	if got := nextUpdatedBefore(time.Time{}); got != "" {
 		t.Fatalf("nextUpdatedBefore(zero) = %q, want empty", got)
+	}
+}
+
+func TestValidateCheckpointFormat(t *testing.T) {
+	if err := validateCheckpointFormat("json"); err != nil {
+		t.Fatalf("validateCheckpointFormat(json) error = %v", err)
+	}
+	if err := validateCheckpointFormat("text"); err != nil {
+		t.Fatalf("validateCheckpointFormat(text) error = %v", err)
+	}
+	if err := validateCheckpointFormat("ndjson"); err == nil {
+		t.Fatal("validateCheckpointFormat(ndjson) expected error")
+	}
+}
+
+func TestWriteCheckpointList(t *testing.T) {
+	var buf bytes.Buffer
+	err := writeCheckpointList(&buf, "text", []db.SearchCheckpoint{
+		{
+			Name:              "recent",
+			ProfileName:       "recent",
+			NextUpdatedBefore: "2026-03-13T11:59:59Z",
+			CompletedAt:       time.Date(2026, 3, 13, 12, 0, 0, 0, time.UTC),
+		},
+	})
+	if err != nil {
+		t.Fatalf("writeCheckpointList() error = %v", err)
+	}
+	output := buf.String()
+	for _, needle := range []string{"recent", "next-updated-before=2026-03-13T11:59:59Z", "completed=2026-03-13T12:00:00Z"} {
+		if !strings.Contains(output, needle) {
+			t.Fatalf("writeCheckpointList() missing %q in %q", needle, output)
+		}
 	}
 }

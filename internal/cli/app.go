@@ -141,6 +141,13 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		defer database.Close()
 		return runUserCommand(commandArgs, stdout, stderr, cfg, database, appLogger)
+	case "checkpoints":
+		database, err := db.New(*dbPath)
+		if err != nil {
+			return fmt.Errorf("opening database: %w", err)
+		}
+		defer database.Close()
+		return runCheckpointCommand(commandArgs, stdout, stderr, database)
 	case "serve":
 		if helpRequested(commandArgs) {
 			return runServeSubcommand(commandArgs, stderr, defaultConfig(), nil, logger.New(false))
@@ -382,6 +389,51 @@ func runUserCommand(args []string, stdout, stderr io.Writer, cfg *config.Config,
 	return nil
 }
 
+func runCheckpointCommand(args []string, stdout, stderr io.Writer, database *db.Database) error {
+	fs := flag.NewFlagSet("checkpoints", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	format := fs.String("format", "text", "Output format: json or text")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if err := validateCheckpointFormat(*format); err != nil {
+		return err
+	}
+
+	subcommand := "list"
+	if fs.NArg() > 0 {
+		subcommand = fs.Arg(0)
+	}
+
+	switch subcommand {
+	case "list":
+		checkpoints, err := database.ListSearchCheckpoints()
+		if err != nil {
+			return err
+		}
+		return writeCheckpointList(stdout, *format, checkpoints)
+	case "show":
+		if fs.NArg() != 2 {
+			return errors.New("checkpoints show requires a checkpoint name")
+		}
+		checkpoint, err := database.GetSearchCheckpoint(fs.Arg(1))
+		if err != nil {
+			return err
+		}
+		return writeCheckpoint(stdout, *format, checkpoint)
+	case "delete":
+		if fs.NArg() != 2 {
+			return errors.New("checkpoints delete requires a checkpoint name")
+		}
+		return database.DeleteSearchCheckpoint(fs.Arg(1))
+	default:
+		return fmt.Errorf("unknown checkpoints subcommand %q", subcommand)
+	}
+}
+
 func runServeSubcommand(args []string, stderr io.Writer, cfg *config.Config, database *db.Database, appLogger *logger.Logger) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -494,6 +546,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  githubwatchdog [global flags] search [search flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] repo <owner>/<repo> [scan flags]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] user <username> [scan flags]")
+	fmt.Fprintln(w, "  githubwatchdog [global flags] checkpoints <list|show|delete> [args]")
 	fmt.Fprintln(w, "  githubwatchdog [global flags] serve [serve flags]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Global flags:")
@@ -628,6 +681,15 @@ func validateFormat(format string) error {
 		return nil
 	default:
 		return fmt.Errorf("invalid format %q: expected json, ndjson, or text", format)
+	}
+}
+
+func validateCheckpointFormat(format string) error {
+	switch format {
+	case "json", "text":
+		return nil
+	default:
+		return fmt.Errorf("invalid format %q: expected json or text", format)
 	}
 }
 
@@ -779,6 +841,68 @@ func writeSearchProfiles(w io.Writer) {
 			_, _ = fmt.Fprintf(w, " per-page=%d", profile.PerPage)
 		}
 		_, _ = fmt.Fprintln(w)
+	}
+}
+
+func writeCheckpointList(w io.Writer, format string, checkpoints []db.SearchCheckpoint) error {
+	switch format {
+	case "json":
+		return writeJSON(w, checkpoints)
+	case "text":
+		if len(checkpoints) == 0 {
+			_, err := io.WriteString(w, "No checkpoints.\n")
+			return err
+		}
+		var sb strings.Builder
+		for _, checkpoint := range checkpoints {
+			sb.WriteString(fmt.Sprintf("- %s", checkpoint.Name))
+			if checkpoint.ProfileName != "" {
+				sb.WriteString(fmt.Sprintf(" profile=%s", checkpoint.ProfileName))
+			}
+			if checkpoint.NextUpdatedBefore != "" {
+				sb.WriteString(fmt.Sprintf(" next-updated-before=%s", checkpoint.NextUpdatedBefore))
+			}
+			if !checkpoint.CompletedAt.IsZero() {
+				sb.WriteString(fmt.Sprintf(" completed=%s", checkpoint.CompletedAt.Format(time.RFC3339)))
+			}
+			sb.WriteString("\n")
+		}
+		_, err := io.WriteString(w, sb.String())
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q", format)
+	}
+}
+
+func writeCheckpoint(w io.Writer, format string, checkpoint db.SearchCheckpoint) error {
+	switch format {
+	case "json":
+		return writeJSON(w, checkpoint)
+	case "text":
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Name: %s\n", checkpoint.Name))
+		sb.WriteString(fmt.Sprintf("Profile: %s\n", checkpoint.ProfileName))
+		sb.WriteString(fmt.Sprintf("Base query: %s\n", checkpoint.BaseQuery))
+		sb.WriteString(fmt.Sprintf("Effective query: %s\n", checkpoint.EffectiveQuery))
+		if checkpoint.Since != "" {
+			sb.WriteString(fmt.Sprintf("Since: %s\n", checkpoint.Since))
+		}
+		if checkpoint.UpdatedBefore != "" {
+			sb.WriteString(fmt.Sprintf("Updated before: %s\n", checkpoint.UpdatedBefore))
+		}
+		if checkpoint.NextUpdatedBefore != "" {
+			sb.WriteString(fmt.Sprintf("Next updated before: %s\n", checkpoint.NextUpdatedBefore))
+		}
+		if !checkpoint.OldestUpdatedAt.IsZero() {
+			sb.WriteString(fmt.Sprintf("Oldest updated at: %s\n", checkpoint.OldestUpdatedAt.Format(time.RFC3339)))
+		}
+		if !checkpoint.CompletedAt.IsZero() {
+			sb.WriteString(fmt.Sprintf("Completed at: %s\n", checkpoint.CompletedAt.Format(time.RFC3339)))
+		}
+		_, err := io.WriteString(w, sb.String())
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q", format)
 	}
 }
 

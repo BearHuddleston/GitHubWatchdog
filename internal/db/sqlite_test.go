@@ -114,3 +114,47 @@ func TestSearchCheckpointUpsertAndGet(t *testing.T) {
 		t.Fatalf("CompletedAt = %v, want %v", checkpoint.CompletedAt, secondCompleted)
 	}
 }
+
+func TestListAndDeleteSearchCheckpoints(t *testing.T) {
+	database, err := New(filepath.Join(t.TempDir(), "watchdog.db"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer database.Close()
+
+	for _, name := range []string{"alpha", "beta"} {
+		if err := database.UpsertSearchCheckpoint(SearchCheckpoint{
+			Name:              name,
+			BaseQuery:         "stars:>5",
+			EffectiveQuery:    "stars:>5",
+			NextUpdatedBefore: "2026-03-13T00:00:00Z",
+			OldestUpdatedAt:   time.Date(2026, 3, 13, 0, 0, 1, 0, time.UTC),
+			CompletedAt:       time.Date(2026, 3, 13, 1, 0, 0, 0, time.UTC),
+		}); err != nil {
+			t.Fatalf("UpsertSearchCheckpoint(%s) error = %v", name, err)
+		}
+	}
+
+	checkpoints, err := database.ListSearchCheckpoints()
+	if err != nil {
+		t.Fatalf("ListSearchCheckpoints() error = %v", err)
+	}
+	if len(checkpoints) != 2 || checkpoints[0].Name != "alpha" || checkpoints[1].Name != "beta" {
+		t.Fatalf("ListSearchCheckpoints() = %+v", checkpoints)
+	}
+
+	if err := database.DeleteSearchCheckpoint("alpha"); err != nil {
+		t.Fatalf("DeleteSearchCheckpoint(alpha) error = %v", err)
+	}
+	if err := database.DeleteSearchCheckpoint("alpha"); err == nil {
+		t.Fatal("DeleteSearchCheckpoint(alpha) expected error for missing checkpoint")
+	}
+
+	checkpoints, err = database.ListSearchCheckpoints()
+	if err != nil {
+		t.Fatalf("ListSearchCheckpoints() after delete error = %v", err)
+	}
+	if len(checkpoints) != 1 || checkpoints[0].Name != "beta" {
+		t.Fatalf("remaining checkpoints = %+v", checkpoints)
+	}
+}
