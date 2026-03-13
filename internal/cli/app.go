@@ -79,6 +79,12 @@ type userSummary struct {
 	Errors         []string `json:"errors,omitempty"`
 }
 
+type verdictErrorSummary struct {
+	EntityType string `json:"entity_type"`
+	Target     string `json:"target"`
+	Error      string `json:"error"`
+}
+
 type exitError struct {
 	code    int
 	message string
@@ -440,6 +446,7 @@ func runVerdictCommand(args []string, stdout, stderr io.Writer, cfg *config.Conf
 	persist := fs.Bool("persist", true, "Persist results to the SQLite database")
 	format := fs.String("format", "json", "Output format: json, ndjson, or text")
 	input := fs.String("input", "", "Read newline-delimited verdict targets from this path; use - for stdin")
+	continueOnError := fs.Bool("continue-on-error", false, "In batch mode, emit structured per-target errors and continue scanning")
 	failOnFindings := fs.Bool("fail-on-findings", false, "Exit with code 10 when findings are present")
 
 	if err := fs.Parse(args); err != nil {
@@ -447,9 +454,6 @@ func runVerdictCommand(args []string, stdout, stderr io.Writer, cfg *config.Conf
 			return nil
 		}
 		return err
-	}
-	if fs.NArg() != 1 {
-		return errors.New("verdict command requires a single <owner>/<repo> or <username> argument")
 	}
 	if err := validateFormat(*format); err != nil {
 		return err
@@ -470,7 +474,7 @@ func runVerdictCommand(args []string, stdout, stderr io.Writer, cfg *config.Conf
 		if err != nil {
 			return err
 		}
-		anyFindings, err := runVerdictBatch(ctx, stdout, *format, service, targets, *persist)
+		anyFindings, err := runVerdictBatch(ctx, stdout, *format, service, targets, *persist, *continueOnError)
 		if err != nil {
 			return err
 		}
@@ -869,8 +873,24 @@ func writeVerdictSummary(w io.Writer, format string, summary interface{}) error 
 		return writeRepoSummary(w, format, typed)
 	case userSummary:
 		return writeUserSummary(w, format, typed)
+	case verdictErrorSummary:
+		return writeVerdictErrorSummary(w, format, typed)
 	default:
 		return fmt.Errorf("unsupported verdict summary type %T", summary)
+	}
+}
+
+func writeVerdictErrorSummary(w io.Writer, format string, summary verdictErrorSummary) error {
+	switch format {
+	case "json":
+		return writeJSON(w, summary)
+	case "ndjson":
+		return writeCompactJSON(w, summary)
+	case "text":
+		_, err := fmt.Fprintf(w, "Target: %s\nError: %s\n", summary.Target, summary.Error)
+		return err
+	default:
+		return fmt.Errorf("unsupported format %q", format)
 	}
 }
 
@@ -1215,21 +1235,37 @@ func parseVerdictTargets(data []byte) ([]string, error) {
 	return targets, nil
 }
 
-func runVerdictBatch(ctx context.Context, stdout io.Writer, format string, service *scan.Service, targets []string, persist bool) (bool, error) {
+func runVerdictBatch(ctx context.Context, stdout io.Writer, format string, service *scan.Service, targets []string, persist, continueOnError bool) (bool, error) {
 	anyFindings := false
 	summaries := make([]interface{}, 0, len(targets))
 	for _, target := range targets {
 		summary, err := scanVerdictTarget(ctx, service, target, persist)
 		if err != nil {
-			return false, err
+			if !continueOnError {
+				return false, err
+			}
+			summary = verdictErrorSummary{
+				EntityType: "error",
+				Target:     target,
+				Error:      err.Error(),
+			}
 		}
 		if verdictHasFindings(summary) {
 			anyFindings = true
 		}
+		if format == "json" {
+			summaries = append(summaries, summary)
+			continue
+		}
+		if err := writeVerdictBatchItem(stdout, format, summary, len(summaries) > 0); err != nil {
+			return false, err
+		}
 		summaries = append(summaries, summary)
 	}
-	if err := writeVerdictBatch(stdout, format, summaries); err != nil {
-		return false, err
+	if format == "json" {
+		if err := writeVerdictBatch(stdout, format, summaries); err != nil {
+			return false, err
+		}
 	}
 	return anyFindings, nil
 }
@@ -1267,9 +1303,20 @@ func verdictHasFindings(summary interface{}) bool {
 		return typed.IsFlagged
 	case userSummary:
 		return typed.IsSuspicious
+	case verdictErrorSummary:
+		return false
 	default:
 		return false
 	}
+}
+
+func writeVerdictBatchItem(w io.Writer, format string, summary interface{}, needsSeparator bool) error {
+	if format == "text" && needsSeparator {
+		if _, err := io.WriteString(w, "\n"); err != nil {
+			return err
+		}
+	}
+	return writeVerdictSummary(w, format, summary)
 }
 
 func writeVerdictBatch(w io.Writer, format string, summaries []interface{}) error {

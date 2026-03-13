@@ -334,6 +334,9 @@ func TestVerdictHasFindings(t *testing.T) {
 	if verdictHasFindings(repoSummary{}) {
 		t.Fatal("verdictHasFindings(clean repo) = true, want false")
 	}
+	if verdictHasFindings(verdictErrorSummary{Target: "bad/target", Error: "boom"}) {
+		t.Fatal("verdictHasFindings(error summary) = true, want false")
+	}
 }
 
 func TestWriteVerdictSummary(t *testing.T) {
@@ -359,6 +362,7 @@ func TestWriteVerdictBatchJSON(t *testing.T) {
 	err := writeVerdictBatch(&buf, "json", []interface{}{
 		repoSummary{EntityType: "repo", RepoID: "owner/repo", IsFlagged: true},
 		userSummary{EntityType: "user", Username: "octocat", IsSuspicious: true},
+		verdictErrorSummary{EntityType: "error", Target: "bad/target", Error: "boom"},
 	})
 	if err != nil {
 		t.Fatalf("writeVerdictBatch(json) error = %v", err)
@@ -368,7 +372,7 @@ func TestWriteVerdictBatchJSON(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatalf("writeVerdictBatch(json) produced invalid JSON: %v\n%s", err, buf.String())
 	}
-	if len(decoded) != 2 {
+	if len(decoded) != 3 {
 		t.Fatalf("writeVerdictBatch(json) decoded len = %d", len(decoded))
 	}
 }
@@ -378,12 +382,13 @@ func TestWriteVerdictBatchText(t *testing.T) {
 	err := writeVerdictBatch(&buf, "text", []interface{}{
 		repoSummary{RepoID: "owner/repo", IsFlagged: true},
 		userSummary{Username: "octocat", IsSuspicious: true},
+		verdictErrorSummary{Target: "bad/target", Error: "boom"},
 	})
 	if err != nil {
 		t.Fatalf("writeVerdictBatch(text) error = %v", err)
 	}
 	output := buf.String()
-	for _, needle := range []string{"Repository: owner/repo", "User: octocat"} {
+	for _, needle := range []string{"Repository: owner/repo", "User: octocat", "Target: bad/target", "Error: boom"} {
 		if !strings.Contains(output, needle) {
 			t.Fatalf("writeVerdictBatch(text) missing %q in %q", needle, output)
 		}

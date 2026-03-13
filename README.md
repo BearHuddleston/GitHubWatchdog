@@ -179,6 +179,7 @@ For mixed batch verdicts, feed newline-delimited targets from stdin or a file:
 ```bash
 printf 'BearHuddleston/GitHubWatchdog\noctocat\n' | ./githubwatchdog verdict --input - --format ndjson
 ./githubwatchdog verdict --input targets.txt --format ndjson --fail-on-findings
+./githubwatchdog verdict --input targets.txt --format ndjson --continue-on-error
 ```
 
 ### Direct Repository Scan
@@ -238,6 +239,7 @@ Options:
 -   `repo --summary` / `user --summary`: Emit a compact machine-readable verdict block
 -   `verdict <owner/repo|username>`: Auto-detect the target type and emit the compact verdict block
 -   `verdict --input <path|->`: Scan newline-delimited mixed targets in one command
+-   `verdict --continue-on-error`: In batch mode, emit per-target error objects instead of aborting on the first failure
 
 Example with custom port:
 
