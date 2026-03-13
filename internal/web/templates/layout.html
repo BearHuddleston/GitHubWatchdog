@@ -232,6 +232,76 @@
             border-color: #0366d6;
             opacity: 1;
         }
+
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .tag-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #eef6ff;
+            border: 1px solid #c8e1ff;
+            color: #0353a4;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+
+        .report-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+
+        .report-link-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 12px;
+            border-radius: 6px;
+            background-color: #0366d6;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .report-link-button:hover {
+            background-color: #0256b3;
+        }
+
+        .secondary-button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #d0d7de;
+            background-color: #fff;
+            color: #24292f;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .secondary-button:hover {
+            background-color: #f6f8fa;
+        }
+
+        .report-summary {
+            width: 100%;
+            min-height: 160px;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 12px;
+            box-sizing: border-box;
+            resize: vertical;
+            background-color: #f6f8fa;
+            font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
         
         .report-icon {
             font-size: 14px;
@@ -537,6 +607,14 @@
                                     <p>Account status: <span class="status-indicator ${data.is_suspicious ? 'suspicious' : 'clean'}">${data.is_suspicious ? 'SUSPICIOUS' : 'CLEAN'}</span></p>
                                     <p>Last analyzed: ${data.processed_at ? new Date(data.processed_at).toLocaleString() : 'Not yet processed'}</p>
                                 </div>
+                                ${data.categories && data.categories.length > 0 ? `
+                                <div class="report-section">
+                                    <h3>Suspicious Account Categories</h3>
+                                    <div class="tag-list">
+                                        ${data.categories.map(category => `<span class="tag-chip">${category}</span>`).join('')}
+                                    </div>
+                                </div>
+                                ` : ''}
                                 ${data.heuristic_flags && data.heuristic_flags.length > 0 ? `
                                 <div class="report-section">
                                     <h3>Detected Flags</h3>
@@ -545,6 +623,17 @@
                                     </ul>
                                 </div>
                                 ` : ''}
+                                <div class="report-section">
+                                    <h3>Guided GitHub Reporting</h3>
+                                    <ol>
+                                        ${(data.report_instructions || []).map(step => `<li>${step}</li>`).join('')}
+                                    </ol>
+                                    <div class="report-actions">
+                                        <a href="${data.profile_url}" class="report-link-button" target="_blank" rel="noopener noreferrer">Open GitHub Profile</a>
+                                        <button type="button" class="secondary-button" data-copy-report>Copy Report Summary</button>
+                                    </div>
+                                    <textarea class="report-summary" readonly>${data.report_summary || ''}</textarea>
+                                </div>
                                 <div class="report-section">
                                     <h3>AI-powered User Analysis</h3>
                                     ${data.ollama_analysis ? 
@@ -589,6 +678,21 @@
                                         this.textContent = 'Generate Analysis';
                                         alert('Error generating analysis: ' + err.message);
                                     });
+                                });
+                            });
+
+                            document.querySelectorAll('[data-copy-report]').forEach(btn => {
+                                btn.addEventListener('click', async function() {
+                                    const summary = this.closest('.report-section').querySelector('.report-summary');
+                                    try {
+                                        await navigator.clipboard.writeText(summary.value);
+                                        this.textContent = 'Copied';
+                                        setTimeout(() => {
+                                            this.textContent = 'Copy Report Summary';
+                                        }, 1500);
+                                    } catch (err) {
+                                        alert('Error copying report summary: ' + err.message);
+                                    }
                                 });
                             });
                         })

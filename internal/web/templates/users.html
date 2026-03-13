@@ -10,6 +10,7 @@
             <th class="sortable" data-column="suspicious_empty_count">Suspicious Empty</th>
             <th class="sortable" data-column="contributions">Contributions</th>
             <th class="sortable" data-column="analysis_result">Status</th>
+            <th>Categories</th>
             <th class="sortable" data-column="processed_at">Processed</th>
         </tr>
     </thead>
@@ -40,11 +41,22 @@
                     </a>
                 </div>
             </td>
+            <td>
+                {{if .Categories}}
+                <div class="tag-list">
+                    {{range .Categories}}
+                    <span class="tag-chip">{{.}}</span>
+                    {{end}}
+                </div>
+                {{else}}
+                <span class="timestamp">None</span>
+                {{end}}
+            </td>
             <td class="timestamp">{{.ProcessedAt.Format "Jan 02, 2006 15:04:05"}}</td>
         </tr>
         {{else}}
         <tr>
-            <td colspan="9">No users found</td>
+            <td colspan="10">No users found</td>
         </tr>
         {{end}}
     </tbody>

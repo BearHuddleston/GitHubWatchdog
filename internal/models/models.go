@@ -70,6 +70,7 @@ type AnalysisResult struct {
 
 // HeuristicResult represents the result of a single heuristic check
 type HeuristicResult struct {
+	Category    string
 	Flag        bool
 	Name        string
 	Description string

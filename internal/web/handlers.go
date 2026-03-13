@@ -36,6 +36,7 @@ type UserData struct {
 	SuspiciousEmptyCount int
 	Contributions        int
 	AnalysisResult       bool
+	Categories           []string
 	ProcessedAt          time.Time
 }
 

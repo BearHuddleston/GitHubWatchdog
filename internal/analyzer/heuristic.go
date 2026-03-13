@@ -22,6 +22,7 @@ func (h *OriginalHeuristic) Evaluate(data models.UserData, repos []models.RepoDa
 	totalStars, emptyCount, _ := computeRepoMetrics(repos)
 	flag := totalStars >= 10 && emptyCount >= 20
 	return models.HeuristicResult{
+		Category:    "Mass Repository Creation",
 		Flag:        flag,
 		Name:        "OriginalHeuristic",
 		Description: "User has sufficient total stars and empty repositories.",
@@ -36,6 +37,7 @@ func (h *NewHeuristic) Evaluate(data models.UserData, repos []models.RepoData) m
 	_, _, suspiciousEmptyCount := computeRepoMetrics(repos)
 	flag := suspiciousEmptyCount >= 5 && data.Contributions <= 5
 	return models.HeuristicResult{
+		Category:    "Automated Activity",
 		Flag:        flag,
 		Name:        "NewHeuristic",
 		Description: "User has many suspicious empty repos and low contributions.",
@@ -50,6 +52,7 @@ func (h *RecentHeuristic) Evaluate(data models.UserData, repos []models.RepoData
 	totalStars, _, _ := computeRepoMetrics(repos)
 	flag := time.Since(data.CreatedAt) < (10*24*time.Hour) && totalStars >= 10
 	return models.HeuristicResult{
+		Category:    "Spam Behavior",
 		Flag:        flag,
 		Name:        "RecentHeuristic",
 		Description: "User is recent and has gathered enough stars.",
@@ -69,12 +72,12 @@ func (rc *ReadmeChecker) Check(ctx context.Context, repo models.RepoData) (bool,
 	if repo.Readme == "" {
 		return false, nil
 	}
-	
+
 	lower := strings.ToLower(repo.Readme)
 	if strings.Contains(lower, "download link") && strings.Contains(lower, "password : 2025") {
 		return true, nil
 	}
-	
+
 	return false, nil
 }
 
@@ -92,12 +95,12 @@ func (lc *LoaderChecker) Check(ctx context.Context, repo models.RepoData) (bool,
 			return true, nil
 		}
 	}
-	
+
 	// Check releases for loader files
 	found, err := lc.Client.CheckRepoReleases(ctx, repo.Owner, repo.Name)
 	if err != nil {
 		return false, err
 	}
-	
+
 	return found, nil
 }

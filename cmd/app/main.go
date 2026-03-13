@@ -348,7 +348,7 @@ func processRepository(
 			if !analyzer.IsUserFlagged(repo.Owner) {
 				for _, hr := range analysis.HeuristicResults {
 					if hr.Flag {
-						flagMsg := fmt.Sprintf("%s: %s", hr.Name, hr.Description)
+						flagMsg := fmt.Sprintf("[%s] %s: %s", hr.Category, hr.Name, hr.Description)
 						if err := database.InsertHeuristicFlag("user", repo.Owner, flagMsg); err != nil {
 							log.Error("Recording flag for user %s via %s: %v", repo.Owner, hr.Name, err)
 						} else {

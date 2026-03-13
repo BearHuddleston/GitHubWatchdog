@@ -39,8 +39,12 @@ type UserReportResponse struct {
 	EmptyCount           int       `json:"empty_count"`
 	SuspiciousEmptyCount int       `json:"suspicious_empty_count"`
 	IsSuspicious         bool      `json:"is_suspicious"`
+	Categories           []string  `json:"categories,omitempty"`
 	ProcessedAt          time.Time `json:"processed_at"`
 	HeuristicFlags       []string  `json:"heuristic_flags"`
+	ProfileURL           string    `json:"profile_url"`
+	ReportSummary        string    `json:"report_summary"`
+	ReportInstructions   []string  `json:"report_instructions"`
 	OllamaAnalysis       string    `json:"ollama_analysis,omitempty"`
 }
 
@@ -174,6 +178,12 @@ func (s *Server) userReportHandler(w http.ResponseWriter, r *http.Request) {
 	// Get user data from database
 	var userData UserReportResponse
 	userData.Username = username
+	userData.ProfileURL = fmt.Sprintf("https://github.com/%s", username)
+	userData.ReportInstructions = []string{
+		"Open the GitHub profile in a new tab.",
+		"Use GitHub's profile actions to choose Block or Report, then Report abuse.",
+		"Paste the summary below and review the evidence before submitting.",
+	}
 
 	// Query for processed user data
 	err := s.db.QueryRow(`
@@ -247,6 +257,17 @@ func (s *Server) userReportHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	userData.Categories = deriveUserCategories(userCategoryInput{
+		CreatedAt:            userData.CreatedAt,
+		TotalStars:           userData.TotalStars,
+		EmptyCount:           userData.EmptyCount,
+		SuspiciousEmptyCount: userData.SuspiciousEmptyCount,
+		Contributions:        userData.Contributions,
+		IsSuspicious:         userData.IsSuspicious,
+		HeuristicFlags:       userData.HeuristicFlags,
+	})
+	userData.ReportSummary = buildUserReportSummary(userData)
+
 	// Check if Ollama analysis is available in the database
 	if s.ollamaEnabled {
 		analysis, err := s.db.GetOllamaAnalysis("user", username, s.ollamaModel)
@@ -258,6 +279,39 @@ func (s *Server) userReportHandler(w http.ResponseWriter, r *http.Request) {
 	// Return the report data as JSON
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(userData)
+}
+
+func buildUserReportSummary(userData UserReportResponse) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("GitHub profile: %s\n", userData.ProfileURL))
+	sb.WriteString(fmt.Sprintf("Account: %s\n", userData.Username))
+	if !userData.CreatedAt.IsZero() {
+		sb.WriteString(fmt.Sprintf("Created: %s\n", userData.CreatedAt.Format("2006-01-02")))
+	}
+	sb.WriteString(fmt.Sprintf("Status: %s\n", ternarySuspicious(userData.IsSuspicious)))
+	if len(userData.Categories) > 0 {
+		sb.WriteString(fmt.Sprintf("Categories: %s\n", strings.Join(userData.Categories, ", ")))
+	}
+	sb.WriteString(fmt.Sprintf("Total stars: %d\n", userData.TotalStars))
+	sb.WriteString(fmt.Sprintf("Contributions: %d\n", userData.Contributions))
+	sb.WriteString(fmt.Sprintf("Empty repositories: %d\n", userData.EmptyCount))
+	sb.WriteString(fmt.Sprintf("Suspicious empty repositories: %d\n", userData.SuspiciousEmptyCount))
+	if len(userData.HeuristicFlags) > 0 {
+		sb.WriteString("Detected flags:\n")
+		for _, flag := range userData.HeuristicFlags {
+			sb.WriteString("- " + flag + "\n")
+		}
+	}
+
+	return strings.TrimSpace(sb.String())
+}
+
+func ternarySuspicious(isSuspicious bool) string {
+	if isSuspicious {
+		return "SUSPICIOUS"
+	}
+	return "CLEAN"
 }
 
 // GenerateAnalysisRequest represents a request to generate an analysis for a repository or user
