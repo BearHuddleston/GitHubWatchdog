@@ -59,6 +59,7 @@ type RepoMetrics struct {
 
 // AnalysisResult represents the result of analyzing a user
 type AnalysisResult struct {
+	CreatedAt            time.Time
 	Suspicious           bool
 	TotalStars           int
 	EmptyCount           int

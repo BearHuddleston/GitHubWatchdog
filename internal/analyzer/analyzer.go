@@ -14,6 +14,7 @@ import (
 // ResultHolder holds an analysis result and a channel to signal completion
 type ResultHolder struct {
 	Result models.AnalysisResult
+	Err    error
 	Ready  chan struct{}
 }
 
@@ -29,25 +30,9 @@ type Analyzer struct {
 // New creates a new analyzer
 func New(client *github.Client) *Analyzer {
 	return &Analyzer{
-		client:         client,
-		logger:         client.GetLogger(),
+		client: client,
+		logger: client.GetLogger(),
 	}
-}
-
-// PreloadUsers preloads user data into the analyzer's cache
-func (a *Analyzer) PreloadUsers(users []string) {
-	for _, user := range users {
-		// Basic placeholder result
-		result := models.AnalysisResult{Suspicious: false}
-		holder := &ResultHolder{
-			Result: result,
-			Ready:  make(chan struct{}),
-		}
-		close(holder.Ready) // mark it as ready
-		a.processedUsers.Store(user, holder)
-		a.userCache.Store(user, result)
-	}
-	a.logger.Info("Preloaded %d users into cache", len(users))
 }
 
 // GetLogger returns the analyzer's logger
@@ -73,6 +58,11 @@ func (a *Analyzer) AnalyzeUser(ctx context.Context, username string) (models.Ana
 	if loaded {
 		// Another goroutine is processing the user. Wait until it's done
 		<-holder.Ready
+		if holder.Err != nil {
+			a.logger.Debug("User %s processing previously failed: %v", username, holder.Err)
+			a.processedUsers.Delete(username)
+			return models.AnalysisResult{}, holder.Err
+		}
 		a.logger.Debug("User %s already being processed; returning cached result.", username)
 		return holder.Result, nil
 	}
@@ -81,14 +71,20 @@ func (a *Analyzer) AnalyzeUser(ctx context.Context, username string) (models.Ana
 	a.logger.Debug("Starting analysis for user %s", username)
 	data, err := a.fetchUserData(ctx, username)
 	if err != nil {
-		close(holder.Ready) // signal waiting goroutines even on error
-		return models.AnalysisResult{}, fmt.Errorf("fetching user data: %w", err)
+		holder.Err = fmt.Errorf("fetching user data: %w", err)
+		close(holder.Ready)
+		a.processedUsers.Delete(username)
+		return models.AnalysisResult{}, holder.Err
 	}
-	
+
 	if len(data.Repositories) == 0 {
 		a.logger.Debug("User %s has no repositories.", username)
-		holder.Result = models.AnalysisResult{Suspicious: false}
+		holder.Result = models.AnalysisResult{
+			CreatedAt:  data.CreatedAt,
+			Suspicious: false,
+		}
 		close(holder.Ready)
+		a.processedUsers.Delete(username)
 		a.userCache.Store(username, holder.Result)
 		return holder.Result, nil
 	}
@@ -99,6 +95,7 @@ func (a *Analyzer) AnalyzeUser(ctx context.Context, username string) (models.Ana
 	heuristicResults, overallSuspicious := EvaluateUserHeuristics(data, repos)
 
 	analysisResult := models.AnalysisResult{
+		CreatedAt:            data.CreatedAt,
 		Suspicious:           overallSuspicious,
 		TotalStars:           totalStars,
 		EmptyCount:           emptyCount,
@@ -110,6 +107,7 @@ func (a *Analyzer) AnalyzeUser(ctx context.Context, username string) (models.Ana
 	// Store the result and signal completion
 	holder.Result = analysisResult
 	close(holder.Ready)
+	a.processedUsers.Delete(username)
 	a.userCache.Store(username, analysisResult)
 	a.logger.Debug("User %s processed: %+v", username, analysisResult)
 	return analysisResult, nil
@@ -184,7 +182,7 @@ func EvaluateUserHeuristics(data models.UserData, repos []models.RepoData) ([]mo
 	heuristics := []UserHeuristic{&OriginalHeuristic{}, &NewHeuristic{}, &RecentHeuristic{}}
 	var suspicious bool
 	var results []models.HeuristicResult
-	
+
 	for _, h := range heuristics {
 		result := h.Evaluate(data, repos)
 		if result.Flag {
@@ -192,7 +190,7 @@ func EvaluateUserHeuristics(data models.UserData, repos []models.RepoData) ([]mo
 		}
 		results = append(results, result)
 	}
-	
+
 	return results, suspicious
 }
 
@@ -202,7 +200,7 @@ func (a *Analyzer) IsRepoMalicious(ctx context.Context, repo models.RepoData) (b
 		&ReadmeChecker{},
 		&LoaderChecker{Client: a.client},
 	}
-	
+
 	for _, checker := range checkers {
 		malicious, err := checker.Check(ctx, repo)
 		if err != nil {
@@ -212,7 +210,7 @@ func (a *Analyzer) IsRepoMalicious(ctx context.Context, repo models.RepoData) (b
 			return true, nil
 		}
 	}
-	
+
 	return false, nil
 }
 
@@ -221,26 +219,26 @@ func (a *Analyzer) CheckRepoFiles(ctx context.Context, owner, name, defaultBranc
 	var repo models.RepoData
 	repo.Owner = owner
 	repo.Name = name
-	
+
 	// Get README
 	readme, err := a.client.GetRepoReadme(ctx, owner, name)
 	if err != nil {
 		a.logger.Debug("Error fetching readme for %s/%s: %v", owner, name, err)
 	}
 	repo.Readme = readme
-	
+
 	// Get tree entries
 	entries, err := a.client.GetRepoTree(ctx, owner, name, defaultBranch)
 	if err != nil {
 		a.logger.Debug("Error fetching tree for %s/%s: %v", owner, name, err)
 	}
 	repo.TreeEntries = entries
-	
+
 	// Check if repository is malicious
 	isMalicious, err := a.IsRepoMalicious(ctx, repo)
 	if err != nil {
 		return repo, false, err
 	}
-	
+
 	return repo, isMalicious, nil
 }

@@ -66,15 +66,15 @@ func (s *Server) repositoryReportHandler(w http.ResponseWriter, r *http.Request)
 	err := s.db.QueryRow(`
 		SELECT updated_at, disk_usage, stargazer_count, is_malicious, processed_at 
 		FROM processed_repositories 
-		WHERE owner = ? AND name = ?`, 
+		WHERE owner = ? AND name = ?`,
 		owner, repo).Scan(
-			&repoData.UpdatedAt,
-			&repoData.Size,
-			&repoData.Stars,
-			&repoData.IsMalicious,
-			&repoData.ProcessedAt,
-		)
-	
+		&repoData.UpdatedAt,
+		&repoData.Size,
+		&repoData.Stars,
+		&repoData.IsMalicious,
+		&repoData.ProcessedAt,
+	)
+
 	if err != nil {
 		// If not in our database, try to get basic info from GitHub
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -106,7 +106,7 @@ func (s *Server) repositoryReportHandler(w http.ResponseWriter, r *http.Request)
 		SELECT flag FROM heuristic_flags 
 		WHERE entity_type = 'repo' AND entity_id = ?`,
 		fmt.Sprintf("%s/%s", owner, repo))
-	
+
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -120,7 +120,7 @@ func (s *Server) repositoryReportHandler(w http.ResponseWriter, r *http.Request)
 	// Try to get the README content from GitHub
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	
+
 	readme, err := githubClient.GetRepoReadme(ctx, owner, repo)
 	if err == nil {
 		// Truncate if too long
@@ -135,7 +135,7 @@ func (s *Server) repositoryReportHandler(w http.ResponseWriter, r *http.Request)
 	if repoData.DefaultBranch == "" {
 		repoData.DefaultBranch = "main" // Fallback to main if we don't have default branch
 	}
-	
+
 	files, err := githubClient.GetRepoTree(ctx, owner, repo, repoData.DefaultBranch)
 	if err == nil {
 		// Only include first 50 files to avoid making response too large
@@ -179,17 +179,17 @@ func (s *Server) userReportHandler(w http.ResponseWriter, r *http.Request) {
 	err := s.db.QueryRow(`
 		SELECT created_at, total_stars, empty_count, suspicious_empty_count, contributions, analysis_result, processed_at 
 		FROM processed_users 
-		WHERE username = ?`, 
+		WHERE username = ?`,
 		username).Scan(
-			&userData.CreatedAt,
-			&userData.TotalStars,
-			&userData.EmptyCount,
-			&userData.SuspiciousEmptyCount,
-			&userData.Contributions,
-			&userData.IsSuspicious,
-			&userData.ProcessedAt,
-		)
-	
+		&userData.CreatedAt,
+		&userData.TotalStars,
+		&userData.EmptyCount,
+		&userData.SuspiciousEmptyCount,
+		&userData.Contributions,
+		&userData.IsSuspicious,
+		&userData.ProcessedAt,
+	)
+
 	if err != nil {
 		// If not in our database, try to get basic info from GitHub
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -214,18 +214,18 @@ func (s *Server) userReportHandler(w http.ResponseWriter, r *http.Request) {
 		repos, err := githubClient.GetUserRepositories(ctx, username)
 		if err == nil {
 			userData.RepoCount = len(repos)
-			
+
 			// Count repositories and stars
 			emptyCount := 0
 			totalStars := 0
-			
+
 			for _, repo := range repos {
 				totalStars += repo.StargazerCount
 				if repo.DiskUsage == 0 {
 					emptyCount++
 				}
 			}
-			
+
 			userData.TotalStars = totalStars
 			userData.EmptyCount = emptyCount
 		}
@@ -236,7 +236,7 @@ func (s *Server) userReportHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT flag FROM heuristic_flags 
 		WHERE entity_type = 'user' AND entity_id = ?`,
 		username)
-	
+
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -345,20 +345,20 @@ func (s *Server) generateOllamaAnalysisHandler(w http.ResponseWriter, r *http.Re
 	if len(contextContent) < 100 {
 		s.logger.Error("Context is too short, might cause poor analysis: %s", contextContent)
 	}
-	
+
 	// Create Ollama client and send request
 	ollamaClient := ollama.NewClient(s.ollamaEndpoint)
-	
+
 	// Set a longer timeout for generation
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	
+
 	// Generate the analysis
 	s.logger.Info("Sending analysis request to Ollama at %s using model %s", s.ollamaEndpoint, s.ollamaModel)
 	analysis, err := ollamaClient.Generate(ctx, s.ollamaModel, contextContent)
 	if err != nil {
 		s.logger.Error("Error generating Ollama analysis: %v", err)
-		
+
 		// Create a fallback response explaining the error
 		failureAnalysis := fmt.Sprintf(`# Analysis Error
 
@@ -374,15 +374,15 @@ func (s *Server) generateOllamaAnalysisHandler(w http.ResponseWriter, r *http.Re
 
 ## Next Steps
 * Try again later
-* Check server logs for more details`, 
+* Check server logs for more details`,
 			err, s.ollamaEndpoint, s.ollamaModel, len(contextContent))
-		
+
 		// Return the error analysis
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(GenerateAnalysisResponse{Analysis: failureAnalysis})
 		return
 	}
-	
+
 	// Check if we got a valid response
 	if len(analysis) < 20 {
 		s.logger.Error("Ollama generated a suspiciously short response: %s", analysis)
@@ -406,10 +406,11 @@ func (s *Server) generateOllamaAnalysisHandler(w http.ResponseWriter, r *http.Re
 // generateRepositoryContext generates context for repository analysis
 func (s *Server) generateRepositoryContext(ctx context.Context, owner, repo string) (string, error) {
 	githubClient := github.NewClient(s.config.GitHubToken, 5, 60, true)
-	
+	defaultBranch := "main"
+
 	// Create a structured prompt for the AI
 	var sb strings.Builder
-	
+
 	// Start with clear instructions
 	sb.WriteString(`# Security Analysis Request
 
@@ -423,11 +424,14 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 	// Basic repository information
 	sb.WriteString(fmt.Sprintf("## Repository Information\n"))
 	sb.WriteString(fmt.Sprintf("- **Repository:** %s/%s\n", owner, repo))
-	
+
 	// Try to get full repository details from GitHub API
 	searchResult, err := githubClient.SearchRepositories(ctx, fmt.Sprintf("repo:%s/%s", owner, repo), 1, 1)
 	if err == nil && len(searchResult.Items) > 0 {
 		item := searchResult.Items[0]
+		if item.DefaultBranch != "" {
+			defaultBranch = item.DefaultBranch
+		}
 		sb.WriteString(fmt.Sprintf("- **Last Updated:** %s\n", item.UpdatedAt.Format("2006-01-02")))
 		sb.WriteString(fmt.Sprintf("- **Size:** %d KB\n", item.Size))
 		sb.WriteString(fmt.Sprintf("- **Stars:** %d\n", item.StargazersCount))
@@ -442,9 +446,9 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 	err = s.db.QueryRow(`
 		SELECT is_malicious, processed_at 
 		FROM processed_repositories 
-		WHERE owner = ? AND name = ?`, 
+		WHERE owner = ? AND name = ?`,
 		owner, repo).Scan(&isMalicious, &processedAt)
-	
+
 	if err == nil {
 		sb.WriteString("## Database Information\n")
 		sb.WriteString(fmt.Sprintf("- **Currently Flagged:** %v\n", isMalicious))
@@ -467,7 +471,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 	}
 
 	// Get file list with structure
-	files, err := githubClient.GetRepoTree(ctx, owner, repo, "")
+	files, err := githubClient.GetRepoTree(ctx, owner, repo, defaultBranch)
 	if err == nil && len(files) > 0 {
 		sb.WriteString("## Repository Structure\n")
 		sb.WriteString("The repository contains the following files:\n```\n")
@@ -489,7 +493,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 		SELECT flag FROM heuristic_flags 
 		WHERE entity_type = 'repo' AND entity_id = ?`,
 		fmt.Sprintf("%s/%s", owner, repo))
-	
+
 	if err == nil {
 		defer rows.Close()
 		var flags []string
@@ -499,7 +503,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 				flags = append(flags, flag)
 			}
 		}
-		
+
 		if len(flags) > 0 {
 			sb.WriteString("## Detected Security Flags\n")
 			for _, flag := range flags {
@@ -510,7 +514,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 			sb.WriteString("## Detected Security Flags\n- No security flags currently detected\n\n")
 		}
 	}
-	
+
 	// Add an explicit request for analysis at the end
 	sb.WriteString(`## Analysis Request
 Based on the information above, please provide:
@@ -528,10 +532,10 @@ Format the output using markdown, with appropriate headers and bullet points for
 // generateUserContext generates context for user analysis
 func (s *Server) generateUserContext(ctx context.Context, username string) (string, error) {
 	githubClient := github.NewClient(s.config.GitHubToken, 5, 60, true)
-	
+
 	// Create a structured prompt for the AI
 	var sb strings.Builder
-	
+
 	// Start with clear instructions
 	sb.WriteString(`# Security Analysis Request
 
@@ -541,7 +545,7 @@ Please analyze the following information and provide a comprehensive account sec
 Format your response in markdown with clear sections for Observations, Risk Analysis, and Recommendations.
 
 `)
-	
+
 	// Basic user information
 	sb.WriteString(fmt.Sprintf("## User Information\n"))
 	sb.WriteString(fmt.Sprintf("- **Username:** %s\n", username))
@@ -550,7 +554,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 	createdAt, err := githubClient.GetUserInfo(ctx, username)
 	if err == nil {
 		sb.WriteString(fmt.Sprintf("- **Account Created:** %s\n", createdAt.Format("2006-01-02")))
-		
+
 		// Calculate account age
 		accountAge := time.Since(createdAt)
 		accountAgeDays := int(accountAge.Hours() / 24)
@@ -574,9 +578,9 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 	err = s.db.QueryRow(`
 		SELECT analysis_result, processed_at 
 		FROM processed_users 
-		WHERE username = ?`, 
+		WHERE username = ?`,
 		username).Scan(&isSuspicious, &processedAt)
-	
+
 	if err == nil {
 		sb.WriteString("## Database Information\n")
 		sb.WriteString(fmt.Sprintf("- **Currently Flagged as Suspicious:** %v\n", isSuspicious))
@@ -592,10 +596,10 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 		totalStars := 0
 		hasPopularRepos := false
 		highStarEmptyRepos := 0
-		
+
 		for _, repo := range repos {
 			totalStars += repo.StargazerCount
-			
+
 			if repo.DiskUsage == 0 {
 				emptyCount++
 				if repo.StargazerCount > 5 {
@@ -604,12 +608,12 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 			} else if repo.DiskUsage < 100 { // Less than 100KB
 				lowContentCount++
 			}
-			
+
 			if repo.StargazerCount > 50 {
 				hasPopularRepos = true
 			}
 		}
-		
+
 		// Repository summary
 		sb.WriteString("## Repository Summary\n")
 		sb.WriteString(fmt.Sprintf("- **Total Repositories:** %d\n", len(repos)))
@@ -618,19 +622,19 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 		sb.WriteString(fmt.Sprintf("- **Low-content Repositories:** %d\n", lowContentCount))
 		sb.WriteString(fmt.Sprintf("- **Popular Repositories:** %v\n", hasPopularRepos))
 		sb.WriteString(fmt.Sprintf("- **Empty Repos with Stars:** %d\n", highStarEmptyRepos))
-		
+
 		// Average stars per repo
 		if len(repos) > 0 {
 			sb.WriteString(fmt.Sprintf("- **Average Stars per Repo:** %.2f\n", float64(totalStars)/float64(len(repos))))
 		}
 		sb.WriteString("\n")
-		
+
 		// List repositories (limited to 50 for context size)
 		sb.WriteString("## Repository List\n")
 		sb.WriteString("```\n")
 		for i, repo := range repos {
 			if i < 50 {
-				sb.WriteString(fmt.Sprintf("- %s (Stars: %d, Size: %d KB)\n", 
+				sb.WriteString(fmt.Sprintf("- %s (Stars: %d, Size: %d KB)\n",
 					repo.Name, repo.StargazerCount, repo.DiskUsage))
 			} else {
 				sb.WriteString("...(more repositories omitted)\n")
@@ -647,7 +651,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 		SELECT flag FROM heuristic_flags 
 		WHERE entity_type = 'user' AND entity_id = ?`,
 		username)
-	
+
 	if err == nil {
 		defer rows.Close()
 		var flags []string
@@ -657,7 +661,7 @@ Format your response in markdown with clear sections for Observations, Risk Anal
 				flags = append(flags, flag)
 			}
 		}
-		
+
 		if len(flags) > 0 {
 			sb.WriteString("## Detected Security Flags\n")
 			for _, flag := range flags {

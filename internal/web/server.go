@@ -57,11 +57,11 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *
 	mux.HandleFunc("/users", s.usersHandler)
 	mux.HandleFunc("/flags", s.flagsHandler)
 	mux.HandleFunc("/static/", s.staticHandler)
-	mux.HandleFunc("/api/repository/status", s.updateRepositoryStatusHandler)
-	mux.HandleFunc("/api/user/status", s.updateUserStatusHandler)
+	mux.HandleFunc("/api/repository/status", s.localWriteOnly(s.updateRepositoryStatusHandler))
+	mux.HandleFunc("/api/user/status", s.localWriteOnly(s.updateUserStatusHandler))
 	mux.HandleFunc("/api/report/repository", s.repositoryReportHandler)
 	mux.HandleFunc("/api/report/user", s.userReportHandler)
-	mux.HandleFunc("/api/analysis/generate", s.generateOllamaAnalysisHandler)
+	mux.HandleFunc("/api/analysis/generate", s.localWriteOnly(s.generateOllamaAnalysisHandler))
 
 	s.handler = mux
 	s.server = &http.Server{
@@ -84,7 +84,7 @@ func ensureTemplateDirectory() error {
 			return fmt.Errorf("creating static directory: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 

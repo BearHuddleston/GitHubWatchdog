@@ -12,11 +12,11 @@ import (
 
 // Database wraps an sql.DB and prepared statements.
 type Database struct {
-	db                *sql.DB
-	insertRepoStmt    *sql.Stmt
-	insertUserStmt    *sql.Stmt
-	insertFlagStmt    *sql.Stmt
-	insertOllamaStmt  *sql.Stmt
+	db               *sql.DB
+	insertRepoStmt   *sql.Stmt
+	insertUserStmt   *sql.Stmt
+	insertFlagStmt   *sql.Stmt
+	insertOllamaStmt *sql.Stmt
 }
 
 // QueryRow executes a query that is expected to return at most one row.
@@ -152,17 +152,33 @@ func (d *Database) createTables() error {
 func (d *Database) prepareStatements() error {
 	var err error
 	d.insertRepoStmt, err = d.db.Prepare(`
-		INSERT OR IGNORE INTO processed_repositories 
+		INSERT INTO processed_repositories 
 			(repo_id, owner, name, updated_at, disk_usage, stargazer_count, is_malicious)
-		VALUES (?, ?, ?, ?, ?, ?, ?);
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(repo_id) DO UPDATE SET
+			owner = excluded.owner,
+			name = excluded.name,
+			updated_at = excluded.updated_at,
+			disk_usage = excluded.disk_usage,
+			stargazer_count = excluded.stargazer_count,
+			is_malicious = excluded.is_malicious,
+			processed_at = CURRENT_TIMESTAMP;
 	`)
 	if err != nil {
 		return fmt.Errorf("preparing insertRepoStmt: %w", err)
 	}
 	d.insertUserStmt, err = d.db.Prepare(`
-		INSERT OR IGNORE INTO processed_users 
+		INSERT INTO processed_users 
 			(username, created_at, total_stars, empty_count, suspicious_empty_count, contributions, analysis_result)
-		VALUES (?, ?, ?, ?, ?, ?, ?);
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(username) DO UPDATE SET
+			created_at = excluded.created_at,
+			total_stars = excluded.total_stars,
+			empty_count = excluded.empty_count,
+			suspicious_empty_count = excluded.suspicious_empty_count,
+			contributions = excluded.contributions,
+			analysis_result = excluded.analysis_result,
+			processed_at = CURRENT_TIMESTAMP;
 	`)
 	if err != nil {
 		return fmt.Errorf("preparing insertUserStmt: %w", err)

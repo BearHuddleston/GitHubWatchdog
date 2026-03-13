@@ -27,7 +27,7 @@ func main() {
 
 	// Parse command line flags
 	webMode := flag.Bool("web", false, "Run in web mode instead of search mode")
-	webAddr := flag.String("addr", ":8080", "Address to run web server on")
+	webAddr := flag.String("addr", "127.0.0.1:8080", "Address to run web server on")
 	flag.Parse()
 
 	// Load configuration
@@ -119,25 +119,25 @@ func runWebServer(database *db.Database, addr string, appLogger *logger.Logger) 
 			appLogger.Fatal("GitHub token not found in environment variable or config")
 		}
 	}
-	
+
 	// Configure the web server
 	ollamaEndpoint := "http://localhost:11434"
 	ollamaModel := "llama3.2"
 	ollamaEnabled := false
-	
+
 	if cfg.Ollama != nil {
 		ollamaEnabled = *cfg.Ollama.Enabled
 		ollamaEndpoint = cfg.Ollama.Endpoint
 		ollamaModel = cfg.Ollama.Model
 	}
-	
+
 	serverConfig := &web.ServerConfig{
 		GitHubToken:    cfg.Token,
 		OllamaEnabled:  ollamaEnabled,
 		OllamaEndpoint: ollamaEndpoint,
 		OllamaModel:    ollamaModel,
 	}
-	
+
 	server := web.NewServer(database, addr, appLogger, serverConfig)
 
 	// Set up signal handling for graceful shutdown
@@ -171,13 +171,6 @@ func runWebServer(database *db.Database, addr string, appLogger *logger.Logger) 
 
 // runSearchMode runs the original repository search functionality
 func runSearchMode(database *db.Database, cfg *config.Config, appLogger *logger.Logger) {
-	// Load processed users from database
-	processedUsers, err := database.GetProcessedUsers()
-	if err != nil {
-		appLogger.Fatal("Loading processed users: %v", err)
-	}
-	appLogger.Info("Loaded %d processed users", len(processedUsers))
-
 	// Initialize GitHub client
 	bufferSize := 500
 	if cfg.RateLimitBuffer != nil {
@@ -193,7 +186,6 @@ func runSearchMode(database *db.Database, cfg *config.Config, appLogger *logger.
 
 	// Initialize analyzer
 	repoAnalyzer := analyzer.New(githubClient)
-	repoAnalyzer.PreloadUsers(processedUsers)
 
 	// Check rate limits before starting
 	appLogger.Info("GitHub token loaded. Starting repository search.")
@@ -371,9 +363,8 @@ func processRepository(
 		if err != nil {
 			log.Error("Analyzing user %s: %v", repo.Owner, err)
 		} else {
-			// Check if the user has already been flagged
+			// Insert flags only once per user per process.
 			if !analyzer.IsUserFlagged(repo.Owner) {
-				// Insert flags only once per user
 				for _, hr := range analysis.HeuristicResults {
 					if hr.Flag {
 						flagMsg := fmt.Sprintf("%s: %s", hr.Name, hr.Description)
@@ -384,15 +375,14 @@ func processRepository(
 						}
 					}
 				}
-
-				if err := database.InsertProcessedUser(repo.Owner, time.Now(), analysis.TotalStars,
-					analysis.EmptyCount, analysis.SuspiciousEmptyCount, analysis.Contributions, analysis.Suspicious); err != nil {
-					log.Error("Recording user %s: %v", repo.Owner, err)
-				}
-
 				analyzer.MarkUserFlagged(repo.Owner)
 			} else {
 				log.Debug("User %s already flagged; skipping flag insertion.", repo.Owner)
+			}
+
+			if err := database.InsertProcessedUser(repo.Owner, analysis.CreatedAt, analysis.TotalStars,
+				analysis.EmptyCount, analysis.SuspiciousEmptyCount, analysis.Contributions, analysis.Suspicious); err != nil {
+				log.Error("Recording user %s: %v", repo.Owner, err)
 			}
 		}
 	}
