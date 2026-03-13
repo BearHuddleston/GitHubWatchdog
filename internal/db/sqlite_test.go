@@ -64,3 +64,53 @@ func TestInsertProcessedUserUpsertsMetrics(t *testing.T) {
 			totalStars, emptyCount, suspiciousEmptyCount, contributions, analysisResult)
 	}
 }
+
+func TestSearchCheckpointUpsertAndGet(t *testing.T) {
+	database, err := New(filepath.Join(t.TempDir(), "watchdog.db"))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer database.Close()
+
+	firstCompleted := time.Date(2026, 3, 13, 12, 0, 0, 0, time.UTC)
+	secondCompleted := firstCompleted.Add(1 * time.Hour)
+
+	if err := database.UpsertSearchCheckpoint(SearchCheckpoint{
+		Name:              "recent-scan",
+		ProfileName:       "recent",
+		BaseQuery:         "stars:>5",
+		EffectiveQuery:    "stars:>5 updated:>=2026-03-06",
+		Since:             "2026-03-06",
+		UpdatedBefore:     "",
+		NextUpdatedBefore: "2026-03-12T11:59:59Z",
+		OldestUpdatedAt:   time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC),
+		CompletedAt:       firstCompleted,
+	}); err != nil {
+		t.Fatalf("UpsertSearchCheckpoint() initial error = %v", err)
+	}
+	if err := database.UpsertSearchCheckpoint(SearchCheckpoint{
+		Name:              "recent-scan",
+		ProfileName:       "backfill",
+		BaseQuery:         "stars:>10",
+		EffectiveQuery:    "stars:>10 updated:<=2026-03-10",
+		Since:             "",
+		UpdatedBefore:     "2026-03-10",
+		NextUpdatedBefore: "2026-03-09T23:59:59Z",
+		OldestUpdatedAt:   time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC),
+		CompletedAt:       secondCompleted,
+	}); err != nil {
+		t.Fatalf("UpsertSearchCheckpoint() update error = %v", err)
+	}
+
+	checkpoint, err := database.GetSearchCheckpoint("recent-scan")
+	if err != nil {
+		t.Fatalf("GetSearchCheckpoint() error = %v", err)
+	}
+
+	if checkpoint.ProfileName != "backfill" || checkpoint.BaseQuery != "stars:>10" || checkpoint.NextUpdatedBefore != "2026-03-09T23:59:59Z" {
+		t.Fatalf("search checkpoint row was not updated: %+v", checkpoint)
+	}
+	if !checkpoint.CompletedAt.Equal(secondCompleted) {
+		t.Fatalf("CompletedAt = %v, want %v", checkpoint.CompletedAt, secondCompleted)
+	}
+}

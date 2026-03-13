@@ -18,6 +18,19 @@ type Database struct {
 	insertFlagStmt *sql.Stmt
 }
 
+// SearchCheckpoint stores resume information for named CLI scans.
+type SearchCheckpoint struct {
+	Name              string
+	ProfileName       string
+	BaseQuery         string
+	EffectiveQuery    string
+	Since             string
+	UpdatedBefore     string
+	NextUpdatedBefore string
+	OldestUpdatedAt   time.Time
+	CompletedAt       time.Time
+}
+
 // QueryRow executes a query that is expected to return at most one row.
 // QueryRow always returns a non-nil value. Errors are deferred until
 // Row's Scan method is called.
@@ -126,6 +139,21 @@ func (d *Database) createTables() error {
 	if _, err := d.db.Exec(flagTable); err != nil {
 		return fmt.Errorf("creating heuristic_flags table: %w", err)
 	}
+	checkpointTable := `
+	CREATE TABLE IF NOT EXISTS search_checkpoints (
+		name TEXT PRIMARY KEY,
+		profile_name TEXT,
+		base_query TEXT,
+		effective_query TEXT,
+		since TEXT,
+		updated_before TEXT,
+		next_updated_before TEXT,
+		oldest_updated_at TIMESTAMP,
+		completed_at TIMESTAMP
+	);`
+	if _, err := d.db.Exec(checkpointTable); err != nil {
+		return fmt.Errorf("creating search_checkpoints table: %w", err)
+	}
 	return nil
 }
 
@@ -232,4 +260,64 @@ func (d *Database) WasRepoProcessed(repoID string, updatedAt time.Time) (bool, e
 		return false, fmt.Errorf("querying processed repository: %w", err)
 	}
 	return !updatedAt.After(storedUpdatedAt), nil
+}
+
+// UpsertSearchCheckpoint stores or updates a named search checkpoint.
+func (d *Database) UpsertSearchCheckpoint(checkpoint SearchCheckpoint) error {
+	_, err := d.db.Exec(`
+		INSERT INTO search_checkpoints
+			(name, profile_name, base_query, effective_query, since, updated_before, next_updated_before, oldest_updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			profile_name = excluded.profile_name,
+			base_query = excluded.base_query,
+			effective_query = excluded.effective_query,
+			since = excluded.since,
+			updated_before = excluded.updated_before,
+			next_updated_before = excluded.next_updated_before,
+			oldest_updated_at = excluded.oldest_updated_at,
+			completed_at = excluded.completed_at;
+	`,
+		checkpoint.Name,
+		checkpoint.ProfileName,
+		checkpoint.BaseQuery,
+		checkpoint.EffectiveQuery,
+		checkpoint.Since,
+		checkpoint.UpdatedBefore,
+		checkpoint.NextUpdatedBefore,
+		checkpoint.OldestUpdatedAt,
+		checkpoint.CompletedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upserting search checkpoint: %w", err)
+	}
+	return nil
+}
+
+// GetSearchCheckpoint retrieves a named search checkpoint.
+func (d *Database) GetSearchCheckpoint(name string) (SearchCheckpoint, error) {
+	var checkpoint SearchCheckpoint
+	err := d.db.QueryRow(`
+		SELECT name, profile_name, base_query, effective_query, since, updated_before, next_updated_before, oldest_updated_at, completed_at
+		FROM search_checkpoints
+		WHERE name = ?`,
+		name,
+	).Scan(
+		&checkpoint.Name,
+		&checkpoint.ProfileName,
+		&checkpoint.BaseQuery,
+		&checkpoint.EffectiveQuery,
+		&checkpoint.Since,
+		&checkpoint.UpdatedBefore,
+		&checkpoint.NextUpdatedBefore,
+		&checkpoint.OldestUpdatedAt,
+		&checkpoint.CompletedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return SearchCheckpoint{}, fmt.Errorf("search checkpoint %q not found", name)
+		}
+		return SearchCheckpoint{}, fmt.Errorf("querying search checkpoint: %w", err)
+	}
+	return checkpoint, nil
 }

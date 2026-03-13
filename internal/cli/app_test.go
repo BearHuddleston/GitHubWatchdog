@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/arkouda/github/GitHubWatchdog/internal/scan"
 )
@@ -154,5 +155,15 @@ func TestWriteSearchProfiles(t *testing.T) {
 		if !strings.Contains(output, needle) {
 			t.Fatalf("writeSearchProfiles() missing %q in output: %s", needle, output)
 		}
+	}
+}
+
+func TestNextUpdatedBefore(t *testing.T) {
+	oldest := time.Date(2026, 3, 13, 12, 0, 0, 0, time.UTC)
+	if got := nextUpdatedBefore(oldest); got != "2026-03-13T11:59:59Z" {
+		t.Fatalf("nextUpdatedBefore() = %q", got)
+	}
+	if got := nextUpdatedBefore(time.Time{}); got != "" {
+		t.Fatalf("nextUpdatedBefore(zero) = %q, want empty", got)
 	}
 }

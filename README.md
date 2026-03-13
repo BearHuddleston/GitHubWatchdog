@@ -141,6 +141,15 @@ Profiles set a default query window and page budget, but any explicit flag still
 
 Search output now carries the selected profile, base query, effective query, and any `since` / `updated-before` values so an agent can log exactly what was executed.
 
+For long-running backfills, save and resume a named checkpoint:
+
+```bash
+./githubwatchdog search --profile backfill --checkpoint backlog
+./githubwatchdog search --checkpoint backlog --resume
+```
+
+The resumed run reuses the saved scan metadata and continues from the stored `next_updated_before` cursor unless you override it explicitly with flags.
+
 ### Direct Repository Scan
 
 ```bash
@@ -191,6 +200,8 @@ Options:
 -   `--updated-before`: Add an `updated:<=...` qualifier without editing the raw query
 -   `--profile`: Apply a built-in `search` preset such as `recent`, `high-signal`, or `backfill`
 -   `--list-profiles`: Print the built-in `search` presets and exit
+-   `--checkpoint`: Save the effective search metadata and next resume cursor under a name
+-   `--resume`: Reload defaults from the named checkpoint before applying explicit flags
 
 Example with custom port:
 

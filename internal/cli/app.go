@@ -40,18 +40,20 @@ type searchNDJSONEvent struct {
 }
 
 type searchSummary struct {
-	ProfileName     string    `json:"profile_name,omitempty"`
-	BaseQuery       string    `json:"base_query,omitempty"`
-	Query           string    `json:"query"`
-	Since           string    `json:"since,omitempty"`
-	UpdatedBefore   string    `json:"updated_before,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	CompletedAt     time.Time `json:"completed_at"`
-	OldestUpdatedAt time.Time `json:"oldest_updated_at,omitempty"`
-	TotalCount      int       `json:"total_count"`
-	AnalyzedCount   int       `json:"analyzed_count"`
-	FlaggedCount    int       `json:"flagged_count"`
-	EmittedCount    int       `json:"emitted_count"`
+	CheckpointName    string    `json:"checkpoint_name,omitempty"`
+	ProfileName       string    `json:"profile_name,omitempty"`
+	BaseQuery         string    `json:"base_query,omitempty"`
+	Query             string    `json:"query"`
+	Since             string    `json:"since,omitempty"`
+	UpdatedBefore     string    `json:"updated_before,omitempty"`
+	NextUpdatedBefore string    `json:"next_updated_before,omitempty"`
+	StartedAt         time.Time `json:"started_at"`
+	CompletedAt       time.Time `json:"completed_at"`
+	OldestUpdatedAt   time.Time `json:"oldest_updated_at,omitempty"`
+	TotalCount        int       `json:"total_count"`
+	AnalyzedCount     int       `json:"analyzed_count"`
+	FlaggedCount      int       `json:"flagged_count"`
+	EmittedCount      int       `json:"emitted_count"`
 }
 
 type exitError struct {
@@ -165,6 +167,8 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	query := fs.String("query", cfg.GitHubQuery, "GitHub search query")
 	profileName := fs.String("profile", "", "Built-in search profile: recent, high-signal, or backfill")
 	listProfiles := fs.Bool("list-profiles", false, "List built-in search profiles and exit")
+	checkpointName := fs.String("checkpoint", "", "Save search progress under this checkpoint name")
+	resume := fs.Bool("resume", false, "Resume search defaults from the named checkpoint")
 	since := fs.String("since", "", "Only include repositories updated on or after this date (YYYY-MM-DD or RFC3339)")
 	updatedBefore := fs.String("updated-before", "", "Only include repositories updated on or before this date (YYYY-MM-DD or RFC3339)")
 	maxPages := fs.Int("max-pages", intValue(cfg.MaxPages, 10), "Maximum number of result pages to scan")
@@ -190,14 +194,44 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		writeSearchProfiles(stdout)
 		return nil
 	}
+	if *resume && strings.TrimSpace(*checkpointName) == "" {
+		return errors.New("--resume requires --checkpoint")
+	}
+
+	var checkpoint db.SearchCheckpoint
+	if *resume {
+		if database == nil {
+			return errors.New("checkpoint resume requires a database")
+		}
+		var err error
+		checkpoint, err = database.GetSearchCheckpoint(*checkpointName)
+		if err != nil {
+			return err
+		}
+	}
 
 	profile, err := resolveSearchProfile(*profileName)
 	if err != nil {
 		return err
 	}
-	queryValue := firstNonEmpty(*query, profile.Query, cfg.GitHubQuery)
-	sinceValue := firstNonEmpty(*since, profile.Since)
-	updatedBeforeValue := firstNonEmpty(*updatedBefore, profile.UpdatedBefore)
+	profileValue := profile.Name
+	if profileValue == "" {
+		profileValue = checkpoint.ProfileName
+	}
+	queryValue := cfg.GitHubQuery
+	if flagPassed(fs, "query") {
+		queryValue = *query
+	} else {
+		queryValue = firstNonEmpty(checkpoint.BaseQuery, profile.Query, cfg.GitHubQuery)
+	}
+	sinceValue := *since
+	if !flagPassed(fs, "since") {
+		sinceValue = firstNonEmpty(checkpoint.Since, profile.Since)
+	}
+	updatedBeforeValue := *updatedBefore
+	if !flagPassed(fs, "updated-before") {
+		updatedBeforeValue = firstNonEmpty(checkpoint.NextUpdatedBefore, checkpoint.UpdatedBefore, profile.UpdatedBefore)
+	}
 	maxPagesValue := *maxPages
 	if !flagPassed(fs, "max-pages") && profile.MaxPages > 0 {
 		maxPagesValue = profile.MaxPages
@@ -212,15 +246,16 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		return err
 	}
 	searchOpts := scan.SearchOptions{
-		ProfileName:   profile.Name,
-		BaseQuery:     queryValue,
-		Query:         effectiveQuery,
-		Since:         sinceValue,
-		UpdatedBefore: updatedBeforeValue,
-		MaxPages:      maxPagesValue,
-		PerPage:       perPageValue,
-		MaxConcurrent: *maxConcurrent,
-		Persist:       *persist,
+		CheckpointName: *checkpointName,
+		ProfileName:    profileValue,
+		BaseQuery:      queryValue,
+		Query:          effectiveQuery,
+		Since:          sinceValue,
+		UpdatedBefore:  updatedBeforeValue,
+		MaxPages:       maxPagesValue,
+		PerPage:        perPageValue,
+		MaxConcurrent:  *maxConcurrent,
+		Persist:        *persist,
 	}
 
 	service := newScanService(cfg, database, appLogger)
@@ -239,7 +274,16 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		if reportErr != nil {
 			return reportErr
 		}
+		report.NextUpdatedBefore = nextUpdatedBefore(report.OldestUpdatedAt)
 		if err := writeSearchReport(stdout, *format, report.Filter(*onlyFlagged, *includeSkipped)); err != nil {
+			return err
+		}
+	}
+	if *format == "ndjson" && report.NextUpdatedBefore == "" {
+		report.NextUpdatedBefore = nextUpdatedBefore(report.OldestUpdatedAt)
+	}
+	if *checkpointName != "" {
+		if err := saveSearchCheckpoint(database, report); err != nil {
 			return err
 		}
 	}
@@ -666,6 +710,13 @@ func listProfilesRequested(args []string) bool {
 	return false
 }
 
+func nextUpdatedBefore(oldest time.Time) string {
+	if oldest.IsZero() {
+		return ""
+	}
+	return oldest.Add(-1 * time.Second).UTC().Format(time.RFC3339)
+}
+
 func resolveSearchProfile(name string) (searchProfile, error) {
 	name = strings.TrimSpace(strings.ToLower(name))
 	if name == "" {
@@ -731,6 +782,23 @@ func writeSearchProfiles(w io.Writer) {
 	}
 }
 
+func saveSearchCheckpoint(database *db.Database, report scan.SearchReport) error {
+	if database == nil || report.CheckpointName == "" {
+		return nil
+	}
+	return database.UpsertSearchCheckpoint(db.SearchCheckpoint{
+		Name:              report.CheckpointName,
+		ProfileName:       report.ProfileName,
+		BaseQuery:         report.BaseQuery,
+		EffectiveQuery:    report.Query,
+		Since:             report.Since,
+		UpdatedBefore:     report.UpdatedBefore,
+		NextUpdatedBefore: report.NextUpdatedBefore,
+		OldestUpdatedAt:   report.OldestUpdatedAt,
+		CompletedAt:       report.CompletedAt,
+	})
+}
+
 func flagPassed(fs *flag.FlagSet, name string) bool {
 	passed := false
 	fs.Visit(func(f *flag.Flag) {
@@ -772,22 +840,25 @@ func writeSearchNDJSON(
 	if err != nil {
 		return report, err
 	}
+	report.NextUpdatedBefore = nextUpdatedBefore(report.OldestUpdatedAt)
 
 	return report, writeCompactJSON(w, searchNDJSONEvent{
 		Type: "summary",
 		Summary: &searchSummary{
-			ProfileName:     report.ProfileName,
-			BaseQuery:       report.BaseQuery,
-			Query:           report.Query,
-			Since:           report.Since,
-			UpdatedBefore:   report.UpdatedBefore,
-			StartedAt:       report.StartedAt,
-			CompletedAt:     report.CompletedAt,
-			OldestUpdatedAt: report.OldestUpdatedAt,
-			TotalCount:      len(report.Results),
-			AnalyzedCount:   report.AnalyzedCount(),
-			FlaggedCount:    report.FlaggedCount(),
-			EmittedCount:    emittedCount,
+			CheckpointName:    report.CheckpointName,
+			ProfileName:       report.ProfileName,
+			BaseQuery:         report.BaseQuery,
+			Query:             report.Query,
+			Since:             report.Since,
+			UpdatedBefore:     report.UpdatedBefore,
+			NextUpdatedBefore: report.NextUpdatedBefore,
+			StartedAt:         report.StartedAt,
+			CompletedAt:       report.CompletedAt,
+			OldestUpdatedAt:   report.OldestUpdatedAt,
+			TotalCount:        len(report.Results),
+			AnalyzedCount:     report.AnalyzedCount(),
+			FlaggedCount:      report.FlaggedCount(),
+			EmittedCount:      emittedCount,
 		},
 	})
 }

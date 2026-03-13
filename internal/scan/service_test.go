@@ -98,11 +98,13 @@ func TestSearchReportFilter(t *testing.T) {
 
 func TestSearchReportFilterPreservesMetadata(t *testing.T) {
 	report := SearchReport{
-		ProfileName:   "recent",
-		BaseQuery:     "stars:>5",
-		Query:         "stars:>5 updated:>=2026-03-06",
-		Since:         "2026-03-06",
-		UpdatedBefore: "2026-03-13",
+		CheckpointName:    "backlog",
+		ProfileName:       "recent",
+		BaseQuery:         "stars:>5",
+		Query:             "stars:>5 updated:>=2026-03-06",
+		Since:             "2026-03-06",
+		UpdatedBefore:     "2026-03-13",
+		NextUpdatedBefore: "2026-03-12T23:59:59Z",
 		Results: []RepoReport{
 			{RepoID: "flagged/repo", IsMalicious: true},
 			{RepoID: "clean/repo"},
@@ -124,5 +126,8 @@ func TestSearchReportFilterPreservesMetadata(t *testing.T) {
 	}
 	if filtered.Since != "2026-03-06" || filtered.UpdatedBefore != "2026-03-13" {
 		t.Fatalf("date metadata not preserved: %+v", filtered)
+	}
+	if filtered.CheckpointName != "backlog" || filtered.NextUpdatedBefore != "2026-03-12T23:59:59Z" {
+		t.Fatalf("checkpoint metadata not preserved: %+v", filtered)
 	}
 }

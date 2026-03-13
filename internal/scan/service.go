@@ -21,15 +21,16 @@ type Service struct {
 
 // SearchOptions controls batch repository scanning.
 type SearchOptions struct {
-	ProfileName   string
-	BaseQuery     string
-	Query         string
-	Since         string
-	UpdatedBefore string
-	MaxPages      int
-	PerPage       int
-	MaxConcurrent int
-	Persist       bool
+	CheckpointName string
+	ProfileName    string
+	BaseQuery      string
+	Query          string
+	Since          string
+	UpdatedBefore  string
+	MaxPages       int
+	PerPage        int
+	MaxConcurrent  int
+	Persist        bool
 }
 
 // RepoOptions controls direct repository scanning.
@@ -47,15 +48,17 @@ type UserOptions struct {
 
 // SearchReport is the machine-readable output from a search scan.
 type SearchReport struct {
-	ProfileName     string       `json:"profile_name,omitempty"`
-	BaseQuery       string       `json:"base_query,omitempty"`
-	Query           string       `json:"query"`
-	Since           string       `json:"since,omitempty"`
-	UpdatedBefore   string       `json:"updated_before,omitempty"`
-	StartedAt       time.Time    `json:"started_at"`
-	CompletedAt     time.Time    `json:"completed_at"`
-	OldestUpdatedAt time.Time    `json:"oldest_updated_at,omitempty"`
-	Results         []RepoReport `json:"results"`
+	CheckpointName    string       `json:"checkpoint_name,omitempty"`
+	ProfileName       string       `json:"profile_name,omitempty"`
+	BaseQuery         string       `json:"base_query,omitempty"`
+	Query             string       `json:"query"`
+	Since             string       `json:"since,omitempty"`
+	UpdatedBefore     string       `json:"updated_before,omitempty"`
+	NextUpdatedBefore string       `json:"next_updated_before,omitempty"`
+	StartedAt         time.Time    `json:"started_at"`
+	CompletedAt       time.Time    `json:"completed_at"`
+	OldestUpdatedAt   time.Time    `json:"oldest_updated_at,omitempty"`
+	Results           []RepoReport `json:"results"`
 }
 
 // RepoReport is the machine-readable output from a repository scan.
@@ -109,12 +112,13 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) (SearchReport,
 // SearchStream scans repositories and invokes onResult for each completed repository report.
 func (s *Service) SearchStream(ctx context.Context, opts SearchOptions, onResult func(RepoReport) error) (SearchReport, error) {
 	report := SearchReport{
-		ProfileName:   opts.ProfileName,
-		BaseQuery:     opts.BaseQuery,
-		Query:         opts.Query,
-		Since:         opts.Since,
-		UpdatedBefore: opts.UpdatedBefore,
-		StartedAt:     time.Now().UTC(),
+		CheckpointName: opts.CheckpointName,
+		ProfileName:    opts.ProfileName,
+		BaseQuery:      opts.BaseQuery,
+		Query:          opts.Query,
+		Since:          opts.Since,
+		UpdatedBefore:  opts.UpdatedBefore,
+		StartedAt:      time.Now().UTC(),
 	}
 
 	opts = normalizeSearchOptions(opts)
