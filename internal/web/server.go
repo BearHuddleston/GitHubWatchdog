@@ -68,7 +68,7 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *
 		Addr:         addr,
 		Handler:      s.handler,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 6 * time.Minute,
 		IdleTimeout:  60 * time.Second,
 	}
 
