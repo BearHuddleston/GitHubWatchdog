@@ -1,135 +1,111 @@
-# GitHubWatchdog - GitHub Suspicious User Detector
+# GitHubWatchdog
 
-GitHubWatchdog is a Go-based microservice that leverages the GitHub API to search for repositories and analyze their owners for suspicious activity. The tool scans repositories using a predefined search query and applies heuristics to flag users who may exhibit unusual patterns, such as newly created accounts or repositories with low disk usage yet high star counts.
+GitHubWatchdog is a Go CLI for scanning GitHub repositories and users for suspicious or malicious patterns. It can run broad searches, targeted repo or user scans, mixed-target verdict batches, and a local web UI backed by SQLite.
 
-I have personally reported **over 3000+ accounts** using this tool.
+The CLI is designed to be agent-friendly:
 
-## Architecture & Project Structure
-
-```
-GitHubWatchdog/
-├── cmd/
-│   └── app/
-│       └── main.go           # CLI entrypoint.
-└── internal/
-    ├── analyzer/
-    │   ├── analyzer.go       # Contains user heuristics and analysis logic.
-    │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
-    ├── cli/
-    │   └── app.go            # Subcommand parsing and CLI output formatting.
-    ├── config/
-    │   └── config.go         # Reads environment variables and sets default configuration.
-    ├── db/
-    │   └── sqlite.go         # Implements SQLite-based storage for processed users and repositories.
-    ├── github/
-    │   ├── client.go         # Sets up the GitHub REST client.
-    │   ├── cache.go          # Implements caching for GitHub API requests.
-    │   └── rate_limiter.go   # Handles GitHub API rate limiting.
-    ├── logger/
-    │   └── logger.go         # Provides logging functionality.
-    ├── models/
-    │   └── models.go         # Defines data structures used throughout the application.
-    ├── scan/
-    │   └── service.go        # Reusable scan service for CLI and agent workflows.
-    └── web/
-        ├── server.go         # Implements HTTP server for web interface.
-        ├── handlers.go       # HTTP request handlers for web interface.
-        ├── data.go           # Database query functions for web interface.
-        ├── api.go            # API endpoints for GitHub data integration.
-        ├── template_funcs.go # Template functions for web interface.
-        ├── templates/        # HTML templates for web interface.
-        └── static/           # Static assets (CSS, JavaScript) for web interface.
-```
-
-## Overview
-
-GitHubWatchdog performs the following tasks:
-
--   **GitHub Client Initialization:**  
-    Creates an authenticated GitHub client using a personal access token (see `internal/github/client.go`).
-
--   **Repository Search & Processing:**  
-    Uses GitHub's REST API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are processed concurrently through the reusable scan service (`internal/scan/service.go`).
-
--   **Processed Repository Tracking:**  
-    The service tracks processed repositories and users in an SQLite database (`github_watchdog.db`) to avoid duplicate analysis. Database interactions are handled by `internal/db/sqlite.go`.
-
--   **User Analysis:**  
-    For repositories with low disk usage, the tool further analyzes the associated user’s account using various heuristics (such as account age, total stars across repositories, and contribution counts). The analysis logic is encapsulated in the `internal/analyzer` package.
-
--   **Heuristic-Based Suspicious Detection:**  
-    The system applies predefined heuristics (see `internal/analyzer/heuristic.go`) to flag accounts with suspicious behavior, such as new accounts with high stars or repositories with empty content but significant stargazer activity.
-
--   **Suspicious User & Repository Recording:**  
-    If a user or repository is flagged as suspicious, the relevant details are logged and stored in the SQLite database.
-
--   **Agent-Friendly CLI:**  
-    The binary exposes explicit `search`, `repo`, `user`, and `serve` commands, with JSON output by default for scan commands.
+- JSON is the default output for scan commands.
+- `ndjson` is available for streaming workflows.
+- Exit code `10` signals findings when `--fail-on-findings` is used.
+- Search checkpoints can be saved, resumed, exported, and imported.
 
 ## Requirements
 
--   **Go Environment:**  
-    Make sure you have Go installed (version 1.16 or later is recommended).
+- Go 1.23.5 or newer
+- A GitHub token in `GITHUB_TOKEN`
 
--   **GitHub Personal Access Token:**  
-    Export a GitHub token as an environment variable:
+Example:
 
-    ```bash
-    export GITHUB_TOKEN=your_github_token_here
-    ```
+```bash
+export GITHUB_TOKEN=your_token_here
+```
 
--   **Dependencies:**  
-    The project uses several Go packages including:
-
-    -   `github.com/mattn/go-sqlite3`
-
-    Dependencies are managed via Go modules. Use `go mod tidy` to ensure all dependencies are fetched.
-
-## Running the Application
-
-Build and run the application from the project root:
+## Build
 
 ```bash
 go build -o githubwatchdog ./cmd/app
 ```
 
-### Batch Search
+## Quick Start
 
-Running the binary with no subcommand still performs the default search:
+Run the default batch search:
 
 ```bash
 ./githubwatchdog
 ```
 
-You can also call the search command explicitly:
+Scan a single repository:
+
+```bash
+./githubwatchdog repo BearHuddleston/GitHubWatchdog
+```
+
+Scan a single user:
+
+```bash
+./githubwatchdog user octocat
+```
+
+Emit a compact verdict instead of the full payload:
+
+```bash
+./githubwatchdog verdict BearHuddleston/GitHubWatchdog
+./githubwatchdog verdict octocat
+```
+
+Start the local web UI:
+
+```bash
+./githubwatchdog serve
+```
+
+The web server listens on [http://127.0.0.1:8080](http://127.0.0.1:8080) by default.
+
+## Commands
+
+```text
+githubwatchdog [global flags] search [search flags]
+githubwatchdog [global flags] repo <owner>/<repo> [scan flags]
+githubwatchdog [global flags] user <username> [scan flags]
+githubwatchdog [global flags] verdict <owner/repo|username> [verdict flags]
+githubwatchdog [global flags] checkpoints <list|show|delete|export|import> [args]
+githubwatchdog [global flags] serve [serve flags]
+```
+
+Global flags:
+
+- `-config`: path to config file, default `config.json`
+- `-db`: path to SQLite database, default `github_watchdog.db`
+
+Running the binary with no subcommand is equivalent to `search`.
+
+## Search Workflows
+
+Basic search:
 
 ```bash
 ./githubwatchdog search --query 'created:>2026-01-01 stars:>5' --max-pages 2
 ```
 
-For agent workflows, these flags are the important ones:
+Only emit flagged results and fail the run if any are found:
 
 ```bash
 ./githubwatchdog search --only-flagged --fail-on-findings
 ```
 
-That keeps the JSON payload focused on suspicious results and exits with code `10` when findings are present.
-
-For long-running scans, use streaming output:
+Stream results as they are discovered:
 
 ```bash
 ./githubwatchdog search --format ndjson --only-flagged
 ```
 
-That emits one result per line as the scan progresses, followed by a final summary line.
-
-For incremental polling, use the validated time filters instead of hand-building `updated:` query fragments:
+Add validated time filters without editing raw `updated:` qualifiers:
 
 ```bash
 ./githubwatchdog search --since 2026-03-01 --updated-before 2026-03-13
 ```
 
-For stable canned searches, use a built-in profile:
+Use a built-in profile:
 
 ```bash
 ./githubwatchdog search --profile recent
@@ -137,20 +113,32 @@ For stable canned searches, use a built-in profile:
 ./githubwatchdog search --list-profiles
 ```
 
-Profiles set a default query window and page budget, but any explicit flag still wins.
+Built-in profiles:
 
-Search output now carries the selected profile, base query, effective query, and any `since` / `updated-before` values so an agent can log exactly what was executed.
+- `recent`
+- `high-signal`
+- `backfill`
 
-For long-running backfills, save and resume a named checkpoint:
+Search output includes scan metadata such as:
+
+- `profile_name`
+- `base_query`
+- `query`
+- `since`
+- `updated_before`
+- `checkpoint_name`
+- `next_updated_before`
+
+## Checkpoints
+
+Save and resume long-running searches:
 
 ```bash
 ./githubwatchdog search --profile backfill --checkpoint backlog
 ./githubwatchdog search --checkpoint backlog --resume
 ```
 
-The resumed run reuses the saved scan metadata and continues from the stored `next_updated_before` cursor unless you override it explicitly with flags.
-
-Checkpoint state is manageable from the CLI:
+Manage stored checkpoints:
 
 ```bash
 ./githubwatchdog checkpoints list
@@ -158,14 +146,16 @@ Checkpoint state is manageable from the CLI:
 ./githubwatchdog checkpoints delete backlog
 ```
 
-You can also move checkpoint state between environments:
+Move checkpoints between machines:
 
 ```bash
 ./githubwatchdog checkpoints export backlog --format json > backlog.json
 ./githubwatchdog checkpoints import --input backlog.json
 ```
 
-For targeted agent checks, request a compact verdict instead of the full repo/user payload:
+## Verdict Workflows
+
+Compact targeted verdicts:
 
 ```bash
 ./githubwatchdog repo BearHuddleston/GitHubWatchdog --summary
@@ -174,7 +164,7 @@ For targeted agent checks, request a compact verdict instead of the full repo/us
 ./githubwatchdog verdict octocat
 ```
 
-For mixed batch verdicts, feed newline-delimited targets from stdin or a file:
+Batch mixed-target verdicts from stdin or a file:
 
 ```bash
 printf 'BearHuddleston/GitHubWatchdog\noctocat\n' | ./githubwatchdog verdict --input - --format ndjson
@@ -182,117 +172,73 @@ printf 'BearHuddleston/GitHubWatchdog\noctocat\n' | ./githubwatchdog verdict --i
 ./githubwatchdog verdict --input targets.txt --format ndjson --continue-on-error
 ```
 
-### Direct Repository Scan
+`verdict --continue-on-error` emits per-target error objects in batch mode instead of aborting on the first failure.
 
-```bash
-./githubwatchdog repo BearHuddleston/GitHubWatchdog
+## Output and Exit Codes
+
+Supported output formats:
+
+- `json`
+- `text`
+- `ndjson`
+
+Notes:
+
+- `search` defaults to `json`, and `ndjson` streams one result per line plus a final summary line.
+- `repo`, `user`, and `verdict` support compact summary output for automation.
+- `--fail-on-findings` returns exit code `10` when suspicious results are present.
+
+## Configuration
+
+`config.json` is optional. If loading it fails but `GITHUB_TOKEN` is set, the CLI falls back to built-in defaults plus the environment token.
+
+Example `config.json`:
+
+```json
+{
+  "max_pages": 10,
+  "per_page": 100,
+  "github_query": "created:>2025-02-25 stars:>5",
+  "max_concurrent": 50,
+  "rate_limit_buffer": 500,
+  "cache_ttl": 60,
+  "verbose": true
+}
 ```
 
-### Direct User Scan
+## Web UI
 
-```bash
-./githubwatchdog user octocat
-```
-
-### Web Interface
-
-To run the application with the web interface for viewing the database:
+Start the UI:
 
 ```bash
 ./githubwatchdog serve
 ```
 
-The web server listens on `127.0.0.1:8080` by default. You can access it at http://127.0.0.1:8080
-
-The web interface includes the following features:
-
--   **Dashboard**: Overview of processed repositories, users, and detected flags
--   **Repository View**: List of analyzed repositories with status indicators
--   **User View**: List of analyzed GitHub users with suspicion status
--   **Flags View**: List of detected heuristic flags
--   **Sortable Tables**: Click on column headers to sort data
--   **Pagination**: Adjustable page size with navigation controls
--   **Status Toggle**: One-click toggle between clean/malicious or clean/suspicious states
--   **Detailed Reports**: Real-time reports using GitHub API for repositories and users
--   **Markdown Rendering**: Properly formatted README display in repository reports
-
-Options:
-
--   `search`: Batch-scan repositories using the configured or supplied query
--   `repo <owner>/<repo>`: Scan a single repository and its owner
--   `user <username>`: Scan a single GitHub user
--   `serve`: Run the web interface
--   `-config`: Specify the configuration file path
--   `-db`: Specify the SQLite database path
--   `--only-flagged`: Limit `search` output to repositories with findings
--   `--include-skipped=false`: Exclude already-processed repositories from `search` output
--   `--fail-on-findings`: Exit with code `10` when suspicious results are found
--   `--format ndjson`: Stream one JSON object per line during `search`
--   `--since`: Add an `updated:>=...` qualifier without editing the raw query
--   `--updated-before`: Add an `updated:<=...` qualifier without editing the raw query
--   `--profile`: Apply a built-in `search` preset such as `recent`, `high-signal`, or `backfill`
--   `--list-profiles`: Print the built-in `search` presets and exit
--   `--checkpoint`: Save the effective search metadata and next resume cursor under a name
--   `--resume`: Reload defaults from the named checkpoint before applying explicit flags
--   `checkpoints list|show|delete`: Inspect or prune saved search checkpoints
--   `checkpoints export|import`: Move checkpoint state between machines or runners
--   `repo --summary` / `user --summary`: Emit a compact machine-readable verdict block
--   `verdict <owner/repo|username>`: Auto-detect the target type and emit the compact verdict block
--   `verdict --input <path|->`: Scan newline-delimited mixed targets in one command
--   `verdict --continue-on-error`: In batch mode, emit per-target error objects instead of aborting on the first failure
-
-Example with custom port:
+Custom address:
 
 ```bash
-./githubwatchdog serve --addr=":9090"
+./githubwatchdog serve --addr :9090
 ```
 
-**Note**: Scan commands default to JSON output so they can be consumed directly by agents or scripts. Use `--format text` for a human-oriented summary. A valid GitHub token is required, which can be provided through the `GITHUB_TOKEN` environment variable or in the `config.json` file.
+The web server binds to loopback by default. The UI provides:
 
-## TO-DO List
+- dashboard views for repositories, users, and flags
+- sortable tables and pagination
+- repo and user detail pages
+- manual status toggles
+- README rendering for repository reports
 
-### Unit Testing
+## Development
 
--   Develop comprehensive unit tests for:
-    -   GitHub client initialization.
-    -   Contribution counting logic.
-    -   User analysis with various edge cases.
-    -   Database persistence and retrieval.
+Run the CLI help:
 
-### Error Handling Improvements
+```bash
+go run ./cmd/app help
+```
 
--   ✅ Enhance error handling throughout the code, especially for network/API errors and database operations.
+Run tests:
 
-### Configuration Enhancements
-
--   ✅ Introduce a configuration file (`config.json`) or command-line flags to allow dynamic setting of thresholds (e.g., repository size, stars threshold, page limits).
-
-### Logging Enhancements
-
--   ✅ Integrate a more robust logging framework that supports log levels and log file rotation.
-
-### Rate Limiting Handling
-
--   ✅ Improve handling for GitHub API rate limits, including automatic retries and exponential backoff.
-
-### Enhanced Query Parameters
-
--   Allow customization of the GitHub search query via environment variables or command-line arguments.
-
-### Performance Optimization
-
--   ✅ Investigate opportunities for further parallel processing when analyzing multiple repositories or users concurrently.
-
-### Web UI Integration
-
--   ✅ Develop and integrate a web UI for viewing database content
--   ✅ Add sortable tables with column headers
--   ✅ Implement pagination and customizable page size
--   ✅ Add status toggle for repository and user classification
--   ✅ Integrate detailed reports with GitHub API data
--   ✅ Implement Markdown rendering for repository READMEs
--   Enhance web UI with real-time monitoring and scanning process management
-
-### CI/CD Integration
-
--   Set up continuous integration to run tests on each commit and pull request.
+```bash
+go test ./...
+go vet ./...
+```
