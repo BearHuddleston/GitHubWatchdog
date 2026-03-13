@@ -10,11 +10,13 @@ I have personally reported **over 3000+ accounts** using this tool.
 GitHubWatchdog/
 ├── cmd/
 │   └── app/
-│       └── main.go           # Bootstraps the application, initializes dependencies, and starts the search loop.
+│       └── main.go           # CLI entrypoint.
 └── internal/
     ├── analyzer/
     │   ├── analyzer.go       # Contains user heuristics and analysis logic.
     │   └── heuristic.go      # Defines heuristic rules for suspicious activity detection.
+    ├── cli/
+    │   └── app.go            # Subcommand parsing and CLI output formatting.
     ├── config/
     │   └── config.go         # Reads environment variables and sets default configuration.
     ├── db/
@@ -27,6 +29,8 @@ GitHubWatchdog/
     │   └── logger.go         # Provides logging functionality.
     ├── models/
     │   └── models.go         # Defines data structures used throughout the application.
+    ├── scan/
+    │   └── service.go        # Reusable scan service for CLI and agent workflows.
     └── web/
         ├── server.go         # Implements HTTP server for web interface.
         ├── handlers.go       # HTTP request handlers for web interface.
@@ -45,7 +49,7 @@ GitHubWatchdog performs the following tasks:
     Creates an authenticated GitHub client using a personal access token (see `internal/github/client.go`).
 
 -   **Repository Search & Processing:**  
-    Uses GitHub's REST API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are processed concurrently in the main search loop (`cmd/app/main.go`).
+    Uses GitHub's REST API to search for repositories matching a specific query (e.g., repositories created after a certain date with more than 5 stars). Results are processed concurrently through the reusable scan service (`internal/scan/service.go`).
 
 -   **Processed Repository Tracking:**  
     The service tracks processed repositories and users in an SQLite database (`github_watchdog.db`) to avoid duplicate analysis. Database interactions are handled by `internal/db/sqlite.go`.
@@ -58,6 +62,9 @@ GitHubWatchdog performs the following tasks:
 
 -   **Suspicious User & Repository Recording:**  
     If a user or repository is flagged as suspicious, the relevant details are logged and stored in the SQLite database.
+
+-   **Agent-Friendly CLI:**  
+    The binary exposes explicit `search`, `repo`, `user`, and `serve` commands, with JSON output by default for scan commands.
 
 ## Requirements
 
@@ -82,20 +89,42 @@ GitHubWatchdog performs the following tasks:
 
 Build and run the application from the project root:
 
-### Search Mode (Default)
-
 ```bash
 go build -o githubwatchdog ./cmd/app
+```
+
+### Batch Search
+
+Running the binary with no subcommand still performs the default search:
+
+```bash
 ./githubwatchdog
 ```
 
-### Web Interface Mode
+You can also call the search command explicitly:
+
+```bash
+./githubwatchdog search --query 'created:>2026-01-01 stars:>5' --max-pages 2
+```
+
+### Direct Repository Scan
+
+```bash
+./githubwatchdog repo BearHuddleston/GitHubWatchdog
+```
+
+### Direct User Scan
+
+```bash
+./githubwatchdog user octocat
+```
+
+### Web Interface
 
 To run the application with the web interface for viewing the database:
 
 ```bash
-go build -o githubwatchdog ./cmd/app
-./githubwatchdog -web
+./githubwatchdog serve
 ```
 
 The web server listens on `127.0.0.1:8080` by default. You can access it at http://127.0.0.1:8080
@@ -114,16 +143,20 @@ The web interface includes the following features:
 
 Options:
 
--   `-web`: Run in web interface mode
--   `-addr`: Specify the web server address (default: `"127.0.0.1:8080"`)
+-   `search`: Batch-scan repositories using the configured or supplied query
+-   `repo <owner>/<repo>`: Scan a single repository and its owner
+-   `user <username>`: Scan a single GitHub user
+-   `serve`: Run the web interface
+-   `-config`: Specify the configuration file path
+-   `-db`: Specify the SQLite database path
 
 Example with custom port:
 
 ```bash
-./githubwatchdog -web -addr=":9090"
+./githubwatchdog serve --addr=":9090"
 ```
 
-**Note**: A valid GitHub token is required for report functionality, which can be provided through the `GITHUB_TOKEN` environment variable or in the `config.json` file.
+**Note**: Scan commands default to JSON output so they can be consumed directly by agents or scripts. Use `--format text` for a human-oriented summary. A valid GitHub token is required, which can be provided through the `GITHUB_TOKEN` environment variable or in the `config.json` file.
 
 ## TO-DO List
 
