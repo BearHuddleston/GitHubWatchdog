@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/arkouda/github/GitHubWatchdog/internal/github"
 	"github.com/arkouda/github/GitHubWatchdog/internal/logger"
@@ -182,9 +183,13 @@ func EvaluateUserHeuristics(data models.UserData, repos []models.RepoData) ([]mo
 	heuristics := []UserHeuristic{&OriginalHeuristic{}, &NewHeuristic{}, &RecentHeuristic{}}
 	var suspicious bool
 	var results []models.HeuristicResult
+	legitimateActivity := hasLegitimateActivitySignals(data, repos)
 
 	for _, h := range heuristics {
 		result := h.Evaluate(data, repos)
+		if legitimateActivity {
+			result.Flag = false
+		}
 		if result.Flag {
 			suspicious = true
 		}
@@ -192,6 +197,20 @@ func EvaluateUserHeuristics(data models.UserData, repos []models.RepoData) ([]mo
 	}
 
 	return results, suspicious
+}
+
+func hasLegitimateActivitySignals(data models.UserData, repos []models.RepoData) bool {
+	accountAge := time.Since(data.CreatedAt)
+	if accountAge < 180*24*time.Hour {
+		return false
+	}
+
+	if data.Contributions >= 50 {
+		return true
+	}
+
+	totalStars, _, _ := computeRepoMetrics(repos)
+	return data.Contributions >= 20 && totalStars >= 100
 }
 
 // IsRepoMalicious checks if a repository is malicious
