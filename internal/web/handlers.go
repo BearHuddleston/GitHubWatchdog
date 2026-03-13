@@ -3,7 +3,6 @@ package web
 import (
 	"html/template"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -103,9 +102,10 @@ func (s *Server) indexHandler(w http.ResponseWriter, r *http.Request) {
 		SortOrder:       "",
 	}
 
-	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
-		filepath.Join("internal/web/templates", "layout.html"),
-		filepath.Join("internal/web/templates", "index.html"),
+	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFS(
+		embeddedAssets,
+		"templates/layout.html",
+		"templates/index.html",
 	)
 	if err != nil {
 		s.logger.Error("Error parsing template: %v", err)
@@ -154,9 +154,10 @@ func (s *Server) repositoriesHandler(w http.ResponseWriter, r *http.Request) {
 		SortOrder:    sortOrder,
 	}
 
-	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
-		filepath.Join("internal/web/templates", "layout.html"),
-		filepath.Join("internal/web/templates", "repositories.html"),
+	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFS(
+		embeddedAssets,
+		"templates/layout.html",
+		"templates/repositories.html",
 	)
 	if err != nil {
 		s.logger.Error("Error parsing template: %v", err)
@@ -205,9 +206,10 @@ func (s *Server) usersHandler(w http.ResponseWriter, r *http.Request) {
 		SortOrder:  sortOrder,
 	}
 
-	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
-		filepath.Join("internal/web/templates", "layout.html"),
-		filepath.Join("internal/web/templates", "users.html"),
+	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFS(
+		embeddedAssets,
+		"templates/layout.html",
+		"templates/users.html",
 	)
 	if err != nil {
 		s.logger.Error("Error parsing template: %v", err)
@@ -256,9 +258,10 @@ func (s *Server) flagsHandler(w http.ResponseWriter, r *http.Request) {
 		SortOrder:  sortOrder,
 	}
 
-	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFiles(
-		filepath.Join("internal/web/templates", "layout.html"),
-		filepath.Join("internal/web/templates", "flags.html"),
+	tmpl, err := template.New("layout.html").Funcs(TemplateFuncs()).ParseFS(
+		embeddedAssets,
+		"templates/layout.html",
+		"templates/flags.html",
 	)
 	if err != nil {
 		s.logger.Error("Error parsing template: %v", err)
@@ -270,11 +273,6 @@ func (s *Server) flagsHandler(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("Error executing template: %v", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 	}
-}
-
-// staticHandler serves static files (CSS, JS, etc.)
-func (s *Server) staticHandler(w http.ResponseWriter, r *http.Request) {
-	http.StripPrefix("/static/", http.FileServer(http.Dir("internal/web/static"))).ServeHTTP(w, r)
 }
 
 // getPaginationParams extracts pagination parameters from the request

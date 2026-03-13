@@ -3,9 +3,8 @@ package web
 
 import (
 	"context"
-	"fmt"
+	"io/fs"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/arkouda/github/GitHubWatchdog/internal/db"
@@ -45,18 +44,17 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *
 		ollamaModel:    conf.OllamaModel,
 	}
 
-	// Set up templates directory
-	if err := ensureTemplateDirectory(); err != nil {
-		logger.Error("Creating templates directory: %v", err)
-	}
-
 	// Create router with handlers
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.indexHandler)
 	mux.HandleFunc("/repositories", s.repositoriesHandler)
 	mux.HandleFunc("/users", s.usersHandler)
 	mux.HandleFunc("/flags", s.flagsHandler)
-	mux.HandleFunc("/static/", s.staticHandler)
+	staticFS, err := fs.Sub(embeddedAssets, "static")
+	if err != nil {
+		logger.Fatal("Loading embedded static assets: %v", err)
+	}
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("/api/repository/status", s.localWriteOnly(s.updateRepositoryStatusHandler))
 	mux.HandleFunc("/api/user/status", s.localWriteOnly(s.updateUserStatusHandler))
 	mux.HandleFunc("/api/report/repository", s.repositoryReportHandler)
@@ -73,19 +71,6 @@ func NewServer(database *db.Database, addr string, logger *logger.Logger, conf *
 	}
 
 	return s
-}
-
-// ensureTemplateDirectory makes sure template directory exists
-func ensureTemplateDirectory() error {
-	// Create static directory if it doesn't exist
-	staticDir := "internal/web/static"
-	if _, err := os.Stat(staticDir); os.IsNotExist(err) {
-		if err := os.MkdirAll(staticDir, 0755); err != nil {
-			return fmt.Errorf("creating static directory: %w", err)
-		}
-	}
-
-	return nil
 }
 
 // Start begins the HTTP server
