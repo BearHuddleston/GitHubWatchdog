@@ -20,15 +20,22 @@ type Database struct {
 
 // SearchCheckpoint stores resume information for named CLI scans.
 type SearchCheckpoint struct {
-	Name              string
-	ProfileName       string
-	BaseQuery         string
-	EffectiveQuery    string
-	Since             string
-	UpdatedBefore     string
-	NextUpdatedBefore string
-	OldestUpdatedAt   time.Time
-	CompletedAt       time.Time
+	Name              string    `json:"name"`
+	ProfileName       string    `json:"profile_name,omitempty"`
+	Activity          string    `json:"activity,omitempty"`
+	BaseQuery         string    `json:"base_query,omitempty"`
+	EffectiveQuery    string    `json:"effective_query,omitempty"`
+	QueriesJSON       string    `json:"queries_json,omitempty"`
+	Since             string    `json:"since,omitempty"`
+	CreatedSince      string    `json:"created_since,omitempty"`
+	CreatedBefore     string    `json:"created_before,omitempty"`
+	UpdatedSince      string    `json:"updated_since,omitempty"`
+	UpdatedBefore     string    `json:"updated_before,omitempty"`
+	NextCreatedBefore string    `json:"next_created_before,omitempty"`
+	NextUpdatedBefore string    `json:"next_updated_before,omitempty"`
+	OldestCreatedAt   time.Time `json:"oldest_created_at,omitempty"`
+	OldestUpdatedAt   time.Time `json:"oldest_updated_at,omitempty"`
+	CompletedAt       time.Time `json:"completed_at,omitempty"`
 }
 
 // QueryRow executes a query that is expected to return at most one row.
@@ -63,6 +70,10 @@ func New(dbPath string) (*Database, error) {
 	if err := database.createTables(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("creating tables: %w", err)
+	}
+	if err := database.migrateTables(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrating tables: %w", err)
 	}
 	if err := database.prepareStatements(); err != nil {
 		db.Close()
@@ -143,11 +154,18 @@ func (d *Database) createTables() error {
 	CREATE TABLE IF NOT EXISTS search_checkpoints (
 		name TEXT PRIMARY KEY,
 		profile_name TEXT,
+		activity TEXT,
 		base_query TEXT,
 		effective_query TEXT,
+		queries_json TEXT,
 		since TEXT,
+		created_since TEXT,
+		created_before TEXT,
+		updated_since TEXT,
 		updated_before TEXT,
+		next_created_before TEXT,
 		next_updated_before TEXT,
+		oldest_created_at TIMESTAMP,
 		oldest_updated_at TIMESTAMP,
 		completed_at TIMESTAMP
 	);`
@@ -155,6 +173,55 @@ func (d *Database) createTables() error {
 		return fmt.Errorf("creating search_checkpoints table: %w", err)
 	}
 	return nil
+}
+
+func (d *Database) migrateTables() error {
+	columns, err := d.tableColumns("search_checkpoints")
+	if err != nil {
+		return err
+	}
+	required := map[string]string{
+		"activity":            "ALTER TABLE search_checkpoints ADD COLUMN activity TEXT;",
+		"queries_json":        "ALTER TABLE search_checkpoints ADD COLUMN queries_json TEXT;",
+		"created_since":       "ALTER TABLE search_checkpoints ADD COLUMN created_since TEXT;",
+		"created_before":      "ALTER TABLE search_checkpoints ADD COLUMN created_before TEXT;",
+		"updated_since":       "ALTER TABLE search_checkpoints ADD COLUMN updated_since TEXT;",
+		"next_created_before": "ALTER TABLE search_checkpoints ADD COLUMN next_created_before TEXT;",
+		"oldest_created_at":   "ALTER TABLE search_checkpoints ADD COLUMN oldest_created_at TIMESTAMP;",
+	}
+	for name, stmt := range required {
+		if columns[name] {
+			continue
+		}
+		if _, err := d.db.Exec(stmt); err != nil {
+			return fmt.Errorf("adding %s to search_checkpoints: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (d *Database) tableColumns(table string) (map[string]bool, error) {
+	rows, err := d.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return nil, fmt.Errorf("querying table info for %s: %w", table, err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return nil, fmt.Errorf("scanning table info for %s: %w", table, err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating table info for %s: %w", table, err)
+	}
+	return columns, nil
 }
 
 func (d *Database) prepareStatements() error {
@@ -266,25 +333,39 @@ func (d *Database) WasRepoProcessed(repoID string, updatedAt time.Time) (bool, e
 func (d *Database) UpsertSearchCheckpoint(checkpoint SearchCheckpoint) error {
 	_, err := d.db.Exec(`
 		INSERT INTO search_checkpoints
-			(name, profile_name, base_query, effective_query, since, updated_before, next_updated_before, oldest_updated_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			(name, profile_name, activity, base_query, effective_query, queries_json, since, created_since, created_before, updated_since, updated_before, next_created_before, next_updated_before, oldest_created_at, oldest_updated_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET
 			profile_name = excluded.profile_name,
+			activity = excluded.activity,
 			base_query = excluded.base_query,
 			effective_query = excluded.effective_query,
+			queries_json = excluded.queries_json,
 			since = excluded.since,
+			created_since = excluded.created_since,
+			created_before = excluded.created_before,
+			updated_since = excluded.updated_since,
 			updated_before = excluded.updated_before,
+			next_created_before = excluded.next_created_before,
 			next_updated_before = excluded.next_updated_before,
+			oldest_created_at = excluded.oldest_created_at,
 			oldest_updated_at = excluded.oldest_updated_at,
 			completed_at = excluded.completed_at;
 	`,
 		checkpoint.Name,
 		checkpoint.ProfileName,
+		checkpoint.Activity,
 		checkpoint.BaseQuery,
 		checkpoint.EffectiveQuery,
+		checkpoint.QueriesJSON,
 		checkpoint.Since,
+		checkpoint.CreatedSince,
+		checkpoint.CreatedBefore,
+		checkpoint.UpdatedSince,
 		checkpoint.UpdatedBefore,
+		checkpoint.NextCreatedBefore,
 		checkpoint.NextUpdatedBefore,
+		checkpoint.OldestCreatedAt,
 		checkpoint.OldestUpdatedAt,
 		checkpoint.CompletedAt,
 	)
@@ -298,18 +379,25 @@ func (d *Database) UpsertSearchCheckpoint(checkpoint SearchCheckpoint) error {
 func (d *Database) GetSearchCheckpoint(name string) (SearchCheckpoint, error) {
 	var checkpoint SearchCheckpoint
 	err := d.db.QueryRow(`
-		SELECT name, profile_name, base_query, effective_query, since, updated_before, next_updated_before, oldest_updated_at, completed_at
+		SELECT name, profile_name, activity, base_query, effective_query, queries_json, since, created_since, created_before, updated_since, updated_before, next_created_before, next_updated_before, oldest_created_at, oldest_updated_at, completed_at
 		FROM search_checkpoints
 		WHERE name = ?`,
 		name,
 	).Scan(
 		&checkpoint.Name,
 		&checkpoint.ProfileName,
+		&checkpoint.Activity,
 		&checkpoint.BaseQuery,
 		&checkpoint.EffectiveQuery,
+		&checkpoint.QueriesJSON,
 		&checkpoint.Since,
+		&checkpoint.CreatedSince,
+		&checkpoint.CreatedBefore,
+		&checkpoint.UpdatedSince,
 		&checkpoint.UpdatedBefore,
+		&checkpoint.NextCreatedBefore,
 		&checkpoint.NextUpdatedBefore,
+		&checkpoint.OldestCreatedAt,
 		&checkpoint.OldestUpdatedAt,
 		&checkpoint.CompletedAt,
 	)
@@ -325,7 +413,7 @@ func (d *Database) GetSearchCheckpoint(name string) (SearchCheckpoint, error) {
 // ListSearchCheckpoints returns all stored search checkpoints ordered by name.
 func (d *Database) ListSearchCheckpoints() ([]SearchCheckpoint, error) {
 	rows, err := d.db.Query(`
-		SELECT name, profile_name, base_query, effective_query, since, updated_before, next_updated_before, oldest_updated_at, completed_at
+		SELECT name, profile_name, activity, base_query, effective_query, queries_json, since, created_since, created_before, updated_since, updated_before, next_created_before, next_updated_before, oldest_created_at, oldest_updated_at, completed_at
 		FROM search_checkpoints
 		ORDER BY name ASC`)
 	if err != nil {
@@ -339,11 +427,18 @@ func (d *Database) ListSearchCheckpoints() ([]SearchCheckpoint, error) {
 		if err := rows.Scan(
 			&checkpoint.Name,
 			&checkpoint.ProfileName,
+			&checkpoint.Activity,
 			&checkpoint.BaseQuery,
 			&checkpoint.EffectiveQuery,
+			&checkpoint.QueriesJSON,
 			&checkpoint.Since,
+			&checkpoint.CreatedSince,
+			&checkpoint.CreatedBefore,
+			&checkpoint.UpdatedSince,
 			&checkpoint.UpdatedBefore,
+			&checkpoint.NextCreatedBefore,
 			&checkpoint.NextUpdatedBefore,
+			&checkpoint.OldestCreatedAt,
 			&checkpoint.OldestUpdatedAt,
 			&checkpoint.CompletedAt,
 		); err != nil {

@@ -27,7 +27,10 @@ type searchProfile struct {
 	Name          string
 	Description   string
 	Query         string
-	Since         string
+	Activity      string
+	CreatedSince  string
+	CreatedBefore string
+	UpdatedSince  string
 	UpdatedBefore string
 	MaxPages      int
 	PerPage       int
@@ -40,15 +43,22 @@ type searchNDJSONEvent struct {
 }
 
 type searchSummary struct {
+	Activity          string    `json:"activity,omitempty"`
 	CheckpointName    string    `json:"checkpoint_name,omitempty"`
 	ProfileName       string    `json:"profile_name,omitempty"`
 	BaseQuery         string    `json:"base_query,omitempty"`
 	Query             string    `json:"query"`
+	Queries           []string  `json:"queries,omitempty"`
 	Since             string    `json:"since,omitempty"`
+	CreatedSince      string    `json:"created_since,omitempty"`
+	CreatedBefore     string    `json:"created_before,omitempty"`
+	UpdatedSince      string    `json:"updated_since,omitempty"`
 	UpdatedBefore     string    `json:"updated_before,omitempty"`
+	NextCreatedBefore string    `json:"next_created_before,omitempty"`
 	NextUpdatedBefore string    `json:"next_updated_before,omitempty"`
 	StartedAt         time.Time `json:"started_at"`
 	CompletedAt       time.Time `json:"completed_at"`
+	OldestCreatedAt   time.Time `json:"oldest_created_at,omitempty"`
 	OldestUpdatedAt   time.Time `json:"oldest_updated_at,omitempty"`
 	TotalCount        int       `json:"total_count"`
 	AnalyzedCount     int       `json:"analyzed_count"`
@@ -171,6 +181,10 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		defer database.Close()
 		return runCheckpointCommand(commandArgs, stdout, stderr, database)
+	case "capabilities":
+		return runCapabilitiesCommand(commandArgs, stdout, stderr)
+	case "recommend":
+		return runRecommendCommand(commandArgs, stdout, stderr)
 	case "help":
 		writeUsage(stdout)
 		return nil
@@ -189,8 +203,11 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	listProfiles := fs.Bool("list-profiles", false, "List built-in search profiles and exit")
 	checkpointName := fs.String("checkpoint", "", "Save search progress under this checkpoint name")
 	resume := fs.Bool("resume", false, "Resume search defaults from the named checkpoint")
+	activity := fs.String("activity", "updated", "Search activity source: updated, created, or either")
 	since := fs.String("since", "", "Only include repositories updated on or after this date (YYYY-MM-DD or RFC3339)")
 	updatedBefore := fs.String("updated-before", "", "Only include repositories updated on or before this date (YYYY-MM-DD or RFC3339)")
+	createdSince := fs.String("created-since", "", "Only include repositories created on or after this date (YYYY-MM-DD or RFC3339)")
+	createdBefore := fs.String("created-before", "", "Only include repositories created on or before this date (YYYY-MM-DD or RFC3339)")
 	maxPages := fs.Int("max-pages", intValue(cfg.MaxPages, 10), "Maximum number of result pages to scan")
 	perPage := fs.Int("per-page", intValue(cfg.PerPage, 100), "Repositories to request per page")
 	maxConcurrent := fs.Int("max-concurrent", intValue(cfg.MaxConcurrent, 10), "Maximum concurrent repository analyses")
@@ -208,6 +225,9 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		return err
 	}
 	if err := validateFormat(*format); err != nil {
+		return err
+	}
+	if err := validateSearchActivity(*activity); err != nil {
 		return err
 	}
 	if *listProfiles {
@@ -238,19 +258,37 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 	if profileValue == "" {
 		profileValue = checkpoint.ProfileName
 	}
+	activityValue := *activity
+	if !flagPassed(fs, "activity") {
+		activityValue = firstNonEmpty(checkpoint.Activity, profile.Activity, "updated")
+	}
 	queryValue := cfg.GitHubQuery
 	if flagPassed(fs, "query") {
 		queryValue = *query
 	} else {
 		queryValue = firstNonEmpty(checkpoint.BaseQuery, profile.Query, cfg.GitHubQuery)
 	}
-	sinceValue := *since
+	updatedSinceValue := *since
 	if !flagPassed(fs, "since") {
-		sinceValue = firstNonEmpty(checkpoint.Since, profile.Since)
+		updatedSinceValue = firstNonEmpty(checkpoint.UpdatedSince, checkpoint.Since, profile.UpdatedSince)
 	}
 	updatedBeforeValue := *updatedBefore
 	if !flagPassed(fs, "updated-before") {
 		updatedBeforeValue = firstNonEmpty(checkpoint.NextUpdatedBefore, checkpoint.UpdatedBefore, profile.UpdatedBefore)
+	}
+	createdSinceValue := *createdSince
+	if !flagPassed(fs, "created-since") {
+		createdSinceValue = firstNonEmpty(checkpoint.CreatedSince, profile.CreatedSince)
+	}
+	createdBeforeValue := *createdBefore
+	if !flagPassed(fs, "created-before") {
+		createdBeforeValue = firstNonEmpty(checkpoint.NextCreatedBefore, checkpoint.CreatedBefore, profile.CreatedBefore)
+	}
+	if activityValue == "either" {
+		createdSinceValue = firstNonEmpty(createdSinceValue, updatedSinceValue)
+		createdBeforeValue = firstNonEmpty(createdBeforeValue, updatedBeforeValue)
+		updatedSinceValue = firstNonEmpty(updatedSinceValue, createdSinceValue)
+		updatedBeforeValue = firstNonEmpty(updatedBeforeValue, createdBeforeValue)
 	}
 	maxPagesValue := *maxPages
 	if !flagPassed(fs, "max-pages") && profile.MaxPages > 0 {
@@ -261,16 +299,26 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		perPageValue = profile.PerPage
 	}
 
-	effectiveQuery, err := buildSearchQuery(queryValue, sinceValue, updatedBeforeValue)
+	queryPlan, err := buildSearchQueryPlan(queryValue, searchTimeFilters{
+		Activity:      activityValue,
+		CreatedSince:  createdSinceValue,
+		CreatedBefore: createdBeforeValue,
+		UpdatedSince:  updatedSinceValue,
+		UpdatedBefore: updatedBeforeValue,
+	})
 	if err != nil {
 		return err
 	}
 	searchOpts := scan.SearchOptions{
 		CheckpointName: *checkpointName,
 		ProfileName:    profileValue,
+		Activity:       activityValue,
 		BaseQuery:      queryValue,
-		Query:          effectiveQuery,
-		Since:          sinceValue,
+		Query:          queryPlan.PrimaryQuery(),
+		Queries:        append([]string(nil), queryPlan.Queries...),
+		CreatedSince:   createdSinceValue,
+		CreatedBefore:  createdBeforeValue,
+		UpdatedSince:   updatedSinceValue,
 		UpdatedBefore:  updatedBeforeValue,
 		MaxPages:       maxPagesValue,
 		PerPage:        perPageValue,
@@ -294,12 +342,14 @@ func runSearchCommand(args []string, stdout, stderr io.Writer, cfg *config.Confi
 		if reportErr != nil {
 			return reportErr
 		}
+		report.NextCreatedBefore = nextCreatedBefore(report.OldestCreatedAt)
 		report.NextUpdatedBefore = nextUpdatedBefore(report.OldestUpdatedAt)
 		if err := writeSearchReport(stdout, *format, report.Filter(*onlyFlagged, *includeSkipped)); err != nil {
 			return err
 		}
 	}
 	if *format == "ndjson" && report.NextUpdatedBefore == "" {
+		report.NextCreatedBefore = nextCreatedBefore(report.OldestCreatedAt)
 		report.NextUpdatedBefore = nextUpdatedBefore(report.OldestUpdatedAt)
 	}
 	if *checkpointName != "" {
@@ -557,6 +607,70 @@ func runCheckpointImport(stdout io.Writer, format string, database *db.Database,
 	return writeCheckpointImportResult(stdout, format, len(checkpoints))
 }
 
+func runCapabilitiesCommand(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("capabilities", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	format := fs.String("format", "json", "Output format: json or text")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if err := validateSimpleFormat(*format); err != nil {
+		return err
+	}
+
+	catalog := buildCapabilityCatalog(time.Now().UTC())
+	switch *format {
+	case "json":
+		return writeJSON(stdout, catalog)
+	case "text":
+		return writeCapabilityCatalogText(stdout, catalog)
+	default:
+		return fmt.Errorf("unsupported format %q", *format)
+	}
+}
+
+func runRecommendCommand(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("recommend", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	prompt := fs.String("prompt", "", "Task prompt to interpret")
+	format := fs.String("format", "json", "Output format: json or text")
+	nowValue := fs.String("now", "", "Reference time for deterministic planning (RFC3339)")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if err := validateSimpleFormat(*format); err != nil {
+		return err
+	}
+
+	taskPrompt := strings.TrimSpace(*prompt)
+	if taskPrompt == "" {
+		taskPrompt = strings.TrimSpace(strings.Join(fs.Args(), " "))
+	}
+	now := time.Now()
+	if strings.TrimSpace(*nowValue) != "" {
+		parsed, err := time.Parse(time.RFC3339, *nowValue)
+		if err != nil {
+			return fmt.Errorf("invalid --now value: %w", err)
+		}
+		now = parsed
+	}
+	result := recommendTask(taskPrompt, now)
+	switch *format {
+	case "json":
+		return writeJSON(stdout, result)
+	case "text":
+		return writeRecommendationText(stdout, result)
+	default:
+		return fmt.Errorf("unsupported format %q", *format)
+	}
+}
+
 func newScanService(cfg *config.Config, database *db.Database, appLogger *logger.Logger) *scan.Service {
 	client := github.NewClient(
 		cfg.Token,
@@ -606,31 +720,6 @@ func openRuntime(configPath, dbPath string, quiet bool) (*config.Config, *db.Dat
 	return cfg, database, appLogger, nil
 }
 
-func writeUsage(w io.Writer) {
-	fmt.Fprintln(w, "GitHubWatchdog")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] search [search flags]")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] repo <owner>/<repo> [scan flags]")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] user <username> [scan flags]")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] verdict <owner/repo|username> [verdict flags]")
-	fmt.Fprintln(w, "  githubwatchdog [global flags] checkpoints <list|show|delete|export|import> [args]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Global flags:")
-	fmt.Fprintln(w, "  -config string   Path to config file (default: config.json)")
-	fmt.Fprintln(w, "  -db string       Path to SQLite database (default: github_watchdog.db)")
-	fmt.Fprintln(w, "  -quiet           Suppress informational logs on stderr")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Notes:")
-	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
-	fmt.Fprintln(w, "  - Use -quiet for automation that wants clean stderr.")
-	fmt.Fprintln(w, "  - search --format ndjson streams result lines plus a final summary line.")
-	fmt.Fprintln(w, "  - search --since and --updated-before add validated updated: qualifiers to the GitHub query.")
-	fmt.Fprintln(w, "  - search --profile applies a built-in preset; explicit flags override the preset.")
-	fmt.Fprintln(w, "  - Running with no subcommand defaults to the batch search command.")
-	fmt.Fprintln(w, "  - Exit code 10 indicates findings when --fail-on-findings is used.")
-}
-
 func writeSearchReport(w io.Writer, format string, report scan.SearchReport) error {
 	switch format {
 	case "json":
@@ -639,11 +728,30 @@ func writeSearchReport(w io.Writer, format string, report scan.SearchReport) err
 		return writeCompactJSON(w, report)
 	case "text":
 		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("Activity: %s\n", report.Activity))
 		sb.WriteString(fmt.Sprintf("Query: %s\n", report.Query))
+		if len(report.Queries) > 0 {
+			sb.WriteString(fmt.Sprintf("Queries: %s\n", strings.Join(report.Queries, " | ")))
+		}
+		if report.CreatedSince != "" {
+			sb.WriteString(fmt.Sprintf("Created since: %s\n", report.CreatedSince))
+		}
+		if report.CreatedBefore != "" {
+			sb.WriteString(fmt.Sprintf("Created before: %s\n", report.CreatedBefore))
+		}
+		if report.UpdatedSince != "" {
+			sb.WriteString(fmt.Sprintf("Updated since: %s\n", report.UpdatedSince))
+		}
+		if report.UpdatedBefore != "" {
+			sb.WriteString(fmt.Sprintf("Updated before: %s\n", report.UpdatedBefore))
+		}
 		sb.WriteString(fmt.Sprintf("Started: %s\n", report.StartedAt.Format(time.RFC3339)))
 		sb.WriteString(fmt.Sprintf("Completed: %s\n", report.CompletedAt.Format(time.RFC3339)))
 		sb.WriteString(fmt.Sprintf("Repositories: %d total, %d analyzed, %d flagged\n",
 			len(report.Results), report.AnalyzedCount(), report.FlaggedCount()))
+		if !report.OldestCreatedAt.IsZero() {
+			sb.WriteString(fmt.Sprintf("Oldest created_at: %s\n", report.OldestCreatedAt.Format(time.RFC3339)))
+		}
 		if !report.OldestUpdatedAt.IsZero() {
 			sb.WriteString(fmt.Sprintf("Oldest updated_at: %s\n", report.OldestUpdatedAt.Format(time.RFC3339)))
 		}
@@ -684,6 +792,7 @@ func writeRepoReport(w io.Writer, format string, report scan.RepoReport) error {
 	case "text":
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("Repository: %s\n", report.RepoID))
+		sb.WriteString(fmt.Sprintf("Created: %s\n", report.CreatedAt.Format(time.RFC3339)))
 		sb.WriteString(fmt.Sprintf("Updated: %s\n", report.UpdatedAt.Format(time.RFC3339)))
 		sb.WriteString(fmt.Sprintf("Disk usage: %d KB\n", report.DiskUsage))
 		sb.WriteString(fmt.Sprintf("Stargazers: %d\n", report.Stargazers))
@@ -735,6 +844,8 @@ func writeUserReport(w io.Writer, format string, report scan.UserReport) error {
 	switch format {
 	case "json":
 		return writeJSON(w, report)
+	case "ndjson":
+		return writeCompactJSON(w, report)
 	case "text":
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("User: %s\n", report.Username))
@@ -840,43 +951,122 @@ func validateCheckpointFormat(format string) error {
 	}
 }
 
+func validateSimpleFormat(format string) error {
+	switch format {
+	case "json", "text":
+		return nil
+	default:
+		return fmt.Errorf("invalid format %q: expected json or text", format)
+	}
+}
+
+func validateSearchActivity(activity string) error {
+	switch activity {
+	case "updated", "created", "either":
+		return nil
+	default:
+		return fmt.Errorf("invalid activity %q: expected updated, created, or either", activity)
+	}
+}
+
 type checkpointImportResult struct {
 	Imported int `json:"imported"`
 }
 
-func buildSearchQuery(baseQuery, since, updatedBefore string) (string, error) {
+type searchTimeFilters struct {
+	Activity      string
+	CreatedSince  string
+	CreatedBefore string
+	UpdatedSince  string
+	UpdatedBefore string
+}
+
+type searchQueryPlan struct {
+	Activity      string
+	Queries       []string
+	CreatedSince  string
+	CreatedBefore string
+	UpdatedSince  string
+	UpdatedBefore string
+}
+
+func (p searchQueryPlan) PrimaryQuery() string {
+	if len(p.Queries) == 0 {
+		return ""
+	}
+	if len(p.Queries) == 1 {
+		return p.Queries[0]
+	}
+	return strings.Join(p.Queries, " | ")
+}
+
+func buildSearchQueryPlan(baseQuery string, filters searchTimeFilters) (searchQueryPlan, error) {
 	query := strings.TrimSpace(baseQuery)
-	if (since != "" || updatedBefore != "") && strings.Contains(strings.ToLower(query), "updated:") {
-		return "", errors.New("cannot combine --since/--updated-before with a query that already includes updated:")
+	if err := validateSearchActivity(filters.Activity); err != nil {
+		return searchQueryPlan{}, err
+	}
+	loweredQuery := strings.ToLower(query)
+	if (filters.UpdatedSince != "" || filters.UpdatedBefore != "") && strings.Contains(loweredQuery, "updated:") {
+		return searchQueryPlan{}, errors.New("cannot combine --since/--updated-before with a query that already includes updated:")
+	}
+	if (filters.CreatedSince != "" || filters.CreatedBefore != "") && strings.Contains(loweredQuery, "created:") {
+		return searchQueryPlan{}, errors.New("cannot combine --created-since/--created-before with a query that already includes created:")
 	}
 
-	var normalizedSince string
-	if since != "" {
-		normalized, err := normalizeSearchDate(since)
+	plan := searchQueryPlan{Activity: filters.Activity}
+	var err error
+	if filters.CreatedSince != "" {
+		plan.CreatedSince, err = normalizeSearchDate(filters.CreatedSince)
 		if err != nil {
-			return "", fmt.Errorf("invalid --since value: %w", err)
+			return searchQueryPlan{}, fmt.Errorf("invalid --created-since value: %w", err)
 		}
-		normalizedSince = normalized
 	}
-	var normalizedUpdatedBefore string
-	if updatedBefore != "" {
-		normalized, err := normalizeSearchDate(updatedBefore)
+	if filters.CreatedBefore != "" {
+		plan.CreatedBefore, err = normalizeSearchDate(filters.CreatedBefore)
 		if err != nil {
-			return "", fmt.Errorf("invalid --updated-before value: %w", err)
+			return searchQueryPlan{}, fmt.Errorf("invalid --created-before value: %w", err)
 		}
-		normalizedUpdatedBefore = normalized
+	}
+	if filters.UpdatedSince != "" {
+		plan.UpdatedSince, err = normalizeSearchDate(filters.UpdatedSince)
+		if err != nil {
+			return searchQueryPlan{}, fmt.Errorf("invalid --since value: %w", err)
+		}
+	}
+	if filters.UpdatedBefore != "" {
+		plan.UpdatedBefore, err = normalizeSearchDate(filters.UpdatedBefore)
+		if err != nil {
+			return searchQueryPlan{}, fmt.Errorf("invalid --updated-before value: %w", err)
+		}
 	}
 
+	switch filters.Activity {
+	case "created":
+		plan.Queries = []string{buildQualifiedSearchQuery(query, "created", plan.CreatedSince, plan.CreatedBefore)}
+	case "either":
+		plan.Queries = []string{
+			buildQualifiedSearchQuery(query, "updated", plan.UpdatedSince, plan.UpdatedBefore),
+			buildQualifiedSearchQuery(query, "created", plan.CreatedSince, plan.CreatedBefore),
+		}
+	default:
+		plan.Queries = []string{buildQualifiedSearchQuery(query, "updated", plan.UpdatedSince, plan.UpdatedBefore)}
+	}
+
+	return plan, nil
+}
+
+func buildQualifiedSearchQuery(baseQuery, qualifier, since, before string) string {
+	query := strings.TrimSpace(baseQuery)
 	switch {
-	case normalizedSince != "" && normalizedUpdatedBefore != "":
-		query = strings.TrimSpace(query + " updated:" + normalizedSince + ".." + normalizedUpdatedBefore)
-	case normalizedSince != "":
-		query = strings.TrimSpace(query + " updated:>=" + normalizedSince)
-	case normalizedUpdatedBefore != "":
-		query = strings.TrimSpace(query + " updated:<=" + normalizedUpdatedBefore)
+	case since != "" && before != "":
+		return strings.TrimSpace(query + " " + qualifier + ":" + since + ".." + before)
+	case since != "":
+		return strings.TrimSpace(query + " " + qualifier + ":>=" + since)
+	case before != "":
+		return strings.TrimSpace(query + " " + qualifier + ":<=" + before)
+	default:
+		return query
 	}
-
-	return query, nil
 }
 
 func normalizeSearchDate(value string) (string, error) {
@@ -941,34 +1131,47 @@ func nextUpdatedBefore(oldest time.Time) string {
 	return oldest.Add(-1 * time.Second).UTC().Format(time.RFC3339)
 }
 
+func nextCreatedBefore(oldest time.Time) string {
+	if oldest.IsZero() {
+		return ""
+	}
+	return oldest.Add(-1 * time.Second).UTC().Format(time.RFC3339)
+}
+
 func resolveSearchProfile(name string) (searchProfile, error) {
+	return resolveSearchProfileAt(name, time.Now().UTC())
+}
+
+func resolveSearchProfileAt(name string, now time.Time) (searchProfile, error) {
 	name = strings.TrimSpace(strings.ToLower(name))
 	if name == "" {
 		return searchProfile{}, nil
 	}
 
-	now := time.Now().UTC()
 	profiles := map[string]searchProfile{
 		"recent": {
-			Name:        "recent",
-			Description: "Fresh activity sweep over the last 7 days with a shallow page budget.",
-			Query:       "stars:>5",
-			Since:       now.Add(-7 * 24 * time.Hour).Format(time.DateOnly),
-			MaxPages:    3,
-			PerPage:     100,
+			Name:         "recent",
+			Description:  "Fresh activity sweep over the last 7 days with a shallow page budget.",
+			Query:        "stars:>5",
+			Activity:     "updated",
+			UpdatedSince: now.Add(-7 * 24 * time.Hour).Format(time.DateOnly),
+			MaxPages:     3,
+			PerPage:      100,
 		},
 		"high-signal": {
-			Name:        "high-signal",
-			Description: "Higher-star recent sweep for likely-visible suspicious repos.",
-			Query:       "stars:>20",
-			Since:       now.Add(-30 * 24 * time.Hour).Format(time.DateOnly),
-			MaxPages:    5,
-			PerPage:     100,
+			Name:         "high-signal",
+			Description:  "Higher-star recent sweep for likely-visible suspicious repos.",
+			Query:        "stars:>20",
+			Activity:     "updated",
+			UpdatedSince: now.Add(-30 * 24 * time.Hour).Format(time.DateOnly),
+			MaxPages:     5,
+			PerPage:      100,
 		},
 		"backfill": {
 			Name:          "backfill",
 			Description:   "Historical sweep older than the recent window for broader backlog coverage.",
 			Query:         "stars:>5",
+			Activity:      "updated",
 			UpdatedBefore: now.Add(-7 * 24 * time.Hour).Format(time.DateOnly),
 			MaxPages:      20,
 			PerPage:       100,
@@ -986,12 +1189,18 @@ func writeSearchProfiles(w io.Writer) {
 	now := time.Now().UTC()
 	_, _ = fmt.Fprintf(w, "Built-in search profiles (generated %s)\n", now.Format(time.RFC3339))
 	for _, name := range []string{"recent", "high-signal", "backfill"} {
-		profile, _ := resolveSearchProfile(name)
+		profile, _ := resolveSearchProfileAt(name, now)
 		_, _ = fmt.Fprintf(w, "\n- %s\n", profile.Name)
 		_, _ = fmt.Fprintf(w, "  %s\n", profile.Description)
-		_, _ = fmt.Fprintf(w, "  query=%q", profile.Query)
-		if profile.Since != "" {
-			_, _ = fmt.Fprintf(w, " since=%s", profile.Since)
+		_, _ = fmt.Fprintf(w, "  query=%q activity=%s", profile.Query, profile.Activity)
+		if profile.CreatedSince != "" {
+			_, _ = fmt.Fprintf(w, " created-since=%s", profile.CreatedSince)
+		}
+		if profile.CreatedBefore != "" {
+			_, _ = fmt.Fprintf(w, " created-before=%s", profile.CreatedBefore)
+		}
+		if profile.UpdatedSince != "" {
+			_, _ = fmt.Fprintf(w, " updated-since=%s", profile.UpdatedSince)
 		}
 		if profile.UpdatedBefore != "" {
 			_, _ = fmt.Fprintf(w, " updated-before=%s", profile.UpdatedBefore)
@@ -1021,6 +1230,12 @@ func writeCheckpointList(w io.Writer, format string, checkpoints []db.SearchChec
 			if checkpoint.ProfileName != "" {
 				sb.WriteString(fmt.Sprintf(" profile=%s", checkpoint.ProfileName))
 			}
+			if checkpoint.Activity != "" {
+				sb.WriteString(fmt.Sprintf(" activity=%s", checkpoint.Activity))
+			}
+			if checkpoint.NextCreatedBefore != "" {
+				sb.WriteString(fmt.Sprintf(" next-created-before=%s", checkpoint.NextCreatedBefore))
+			}
 			if checkpoint.NextUpdatedBefore != "" {
 				sb.WriteString(fmt.Sprintf(" next-updated-before=%s", checkpoint.NextUpdatedBefore))
 			}
@@ -1044,16 +1259,29 @@ func writeCheckpoint(w io.Writer, format string, checkpoint db.SearchCheckpoint)
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("Name: %s\n", checkpoint.Name))
 		sb.WriteString(fmt.Sprintf("Profile: %s\n", checkpoint.ProfileName))
+		sb.WriteString(fmt.Sprintf("Activity: %s\n", checkpoint.Activity))
 		sb.WriteString(fmt.Sprintf("Base query: %s\n", checkpoint.BaseQuery))
 		sb.WriteString(fmt.Sprintf("Effective query: %s\n", checkpoint.EffectiveQuery))
-		if checkpoint.Since != "" {
-			sb.WriteString(fmt.Sprintf("Since: %s\n", checkpoint.Since))
+		if checkpoint.CreatedSince != "" {
+			sb.WriteString(fmt.Sprintf("Created since: %s\n", checkpoint.CreatedSince))
+		}
+		if checkpoint.CreatedBefore != "" {
+			sb.WriteString(fmt.Sprintf("Created before: %s\n", checkpoint.CreatedBefore))
+		}
+		if checkpoint.UpdatedSince != "" || checkpoint.Since != "" {
+			sb.WriteString(fmt.Sprintf("Updated since: %s\n", firstNonEmpty(checkpoint.UpdatedSince, checkpoint.Since)))
 		}
 		if checkpoint.UpdatedBefore != "" {
 			sb.WriteString(fmt.Sprintf("Updated before: %s\n", checkpoint.UpdatedBefore))
 		}
+		if checkpoint.NextCreatedBefore != "" {
+			sb.WriteString(fmt.Sprintf("Next created before: %s\n", checkpoint.NextCreatedBefore))
+		}
 		if checkpoint.NextUpdatedBefore != "" {
 			sb.WriteString(fmt.Sprintf("Next updated before: %s\n", checkpoint.NextUpdatedBefore))
+		}
+		if !checkpoint.OldestCreatedAt.IsZero() {
+			sb.WriteString(fmt.Sprintf("Oldest created at: %s\n", checkpoint.OldestCreatedAt.Format(time.RFC3339)))
 		}
 		if !checkpoint.OldestUpdatedAt.IsZero() {
 			sb.WriteString(fmt.Sprintf("Oldest updated at: %s\n", checkpoint.OldestUpdatedAt.Format(time.RFC3339)))
@@ -1088,11 +1316,18 @@ func saveSearchCheckpoint(database *db.Database, report scan.SearchReport) error
 	return database.UpsertSearchCheckpoint(db.SearchCheckpoint{
 		Name:              report.CheckpointName,
 		ProfileName:       report.ProfileName,
+		Activity:          report.Activity,
 		BaseQuery:         report.BaseQuery,
 		EffectiveQuery:    report.Query,
+		QueriesJSON:       mustMarshalQueries(report.Queries),
 		Since:             report.Since,
+		CreatedSince:      report.CreatedSince,
+		CreatedBefore:     report.CreatedBefore,
+		UpdatedSince:      report.UpdatedSince,
 		UpdatedBefore:     report.UpdatedBefore,
+		NextCreatedBefore: report.NextCreatedBefore,
 		NextUpdatedBefore: report.NextUpdatedBefore,
+		OldestCreatedAt:   report.OldestCreatedAt,
 		OldestUpdatedAt:   report.OldestUpdatedAt,
 		CompletedAt:       report.CompletedAt,
 	})
@@ -1332,6 +1567,17 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func mustMarshalQueries(queries []string) string {
+	if len(queries) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(queries)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
 func writeSearchNDJSON(
 	w io.Writer,
 	service *scan.Service,
@@ -1354,20 +1600,28 @@ func writeSearchNDJSON(
 	if err != nil {
 		return report, err
 	}
+	report.NextCreatedBefore = nextCreatedBefore(report.OldestCreatedAt)
 	report.NextUpdatedBefore = nextUpdatedBefore(report.OldestUpdatedAt)
 
 	return report, writeCompactJSON(w, searchNDJSONEvent{
 		Type: "summary",
 		Summary: &searchSummary{
+			Activity:          report.Activity,
 			CheckpointName:    report.CheckpointName,
 			ProfileName:       report.ProfileName,
 			BaseQuery:         report.BaseQuery,
 			Query:             report.Query,
+			Queries:           report.Queries,
 			Since:             report.Since,
+			CreatedSince:      report.CreatedSince,
+			CreatedBefore:     report.CreatedBefore,
+			UpdatedSince:      report.UpdatedSince,
 			UpdatedBefore:     report.UpdatedBefore,
+			NextCreatedBefore: report.NextCreatedBefore,
 			NextUpdatedBefore: report.NextUpdatedBefore,
 			StartedAt:         report.StartedAt,
 			CompletedAt:       report.CompletedAt,
+			OldestCreatedAt:   report.OldestCreatedAt,
 			OldestUpdatedAt:   report.OldestUpdatedAt,
 			TotalCount:        len(report.Results),
 			AnalyzedCount:     report.AnalyzedCount(),

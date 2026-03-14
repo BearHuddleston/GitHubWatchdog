@@ -10,6 +10,8 @@ description: Use this skill when working in the GitHubWatchdog repository to sca
 Use the local CLI instead of reimplementing scans or calling GitHub directly for normal detection tasks. Prefer JSON or NDJSON output so downstream agents can parse results without scraping text output.
 
 Read [references/commands.md](references/commands.md) when you need exact command patterns or a reminder of key output fields.
+Prefer `go run ./cmd/app capabilities --format json` when you need the authoritative command and flag catalog from the binary itself.
+Prefer `go run ./cmd/app recommend --prompt '...' --format json` when the user prompt is underspecified and you want the CLI to suggest the command shape before executing anything.
 
 ## Quick Start
 
@@ -30,6 +32,8 @@ Build the binary only when that is materially helpful. `go run ./cmd/app ...` is
 - Use `verdict <owner/repo|username>` when the target type may vary or you only need the compact verdict block.
 - Use `verdict --input ...` for newline-delimited mixed repo/user target batches.
 - Use `checkpoints` when a long-running `search` must be resumed, inspected, exported, imported, or pruned.
+- Use `capabilities` when another agent needs a machine-readable command/flag schema.
+- Use `recommend` when another agent needs a deterministic suggested invocation from a natural-language task.
 
 ## Run Agent-Friendly Scans
 
@@ -64,17 +68,17 @@ Use checkpoint workflows for resumable scans:
 
 Translate time windows from the prompt into CLI flags:
 
-- If the prompt says "last few days", "last 72 hours", "since yesterday", or similar, choose `--since` and optionally `--updated-before` based on that request instead of hard-coding dates unrelated to the prompt.
+- If the prompt says "last few days", "last 72 hours", "since yesterday", or similar, choose `--since`, `--created-since`, or both based on whether the user asked for updated repos, new repos, or new-or-updated repos.
 - If the prompt implies "up to now", prefer only `--since` rather than adding an unnecessary upper bound.
 - If the prompt gives explicit dates, preserve them exactly in the CLI flags and in any summary you return.
 
-Do not manually rebuild `updated:` query fragments when `--since` or `--updated-before` can express the same intent. The CLI already validates and applies those qualifiers.
+Do not manually rebuild `created:` or `updated:` query fragments when the structured time flags can express the same intent. The CLI already validates and applies those qualifiers.
 
 ## Summarize Results Correctly
 
 - Treat `repo`, `user`, and `verdict` summary output as the authoritative compact verdict block.
 - For `search --format ndjson`, expect result events followed by a final summary event.
-- Preserve scan metadata such as `profile_name`, `query`, `since`, `updated_before`, `checkpoint_name`, and `next_updated_before` when reporting what was executed.
+- Preserve scan metadata such as `activity`, `profile_name`, `query`, `queries`, `created_since`, `created_before`, `updated_since`, `updated_before`, `checkpoint_name`, `next_created_before`, and `next_updated_before` when reporting what was executed.
 - Call out whether findings came from repository heuristics, owner suspicion, or user heuristics when summarizing flagged results.
 
 ## Guardrails

@@ -101,9 +101,12 @@ func TestSearchReportFilterPreservesMetadata(t *testing.T) {
 	report := SearchReport{
 		CheckpointName:    "backlog",
 		ProfileName:       "recent",
+		Activity:          "updated",
 		BaseQuery:         "stars:>5",
 		Query:             "stars:>5 updated:>=2026-03-06",
+		Queries:           []string{"stars:>5 updated:>=2026-03-06"},
 		Since:             "2026-03-06",
+		UpdatedSince:      "2026-03-06",
 		UpdatedBefore:     "2026-03-13",
 		NextUpdatedBefore: "2026-03-12T23:59:59Z",
 		Results: []RepoReport{
@@ -122,8 +125,14 @@ func TestSearchReportFilterPreservesMetadata(t *testing.T) {
 	if filtered.BaseQuery != "stars:>5" {
 		t.Fatalf("BaseQuery = %q, want stars:>5", filtered.BaseQuery)
 	}
+	if filtered.Activity != "updated" {
+		t.Fatalf("Activity = %q, want updated", filtered.Activity)
+	}
 	if filtered.Query != "stars:>5 updated:>=2026-03-06" {
 		t.Fatalf("Query = %q", filtered.Query)
+	}
+	if len(filtered.Queries) != 1 || filtered.Queries[0] != "stars:>5 updated:>=2026-03-06" {
+		t.Fatalf("Queries = %+v", filtered.Queries)
 	}
 	if filtered.Since != "2026-03-06" || filtered.UpdatedBefore != "2026-03-13" {
 		t.Fatalf("date metadata not preserved: %+v", filtered)
@@ -133,19 +142,51 @@ func TestSearchReportFilterPreservesMetadata(t *testing.T) {
 	}
 }
 
-func TestFilterSearchItemsByUpdatedAt(t *testing.T) {
+func TestFilterSearchItemsUpdated(t *testing.T) {
 	items := []models.RepoItem{
 		{Name: "old", UpdatedAt: time.Date(2026, 3, 5, 4, 19, 40, 0, time.UTC)},
 		{Name: "inside", UpdatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC)},
 		{Name: "late", UpdatedAt: time.Date(2026, 3, 14, 0, 0, 1, 0, time.UTC)},
 	}
 
-	filtered, err := filterSearchItemsByUpdatedAt(items, "2026-03-10", "2026-03-13")
+	filtered, err := filterSearchItems(items, "updated", "", "", "2026-03-10", "2026-03-13")
 	if err != nil {
-		t.Fatalf("filterSearchItemsByUpdatedAt() error = %v", err)
+		t.Fatalf("filterSearchItems(updated) error = %v", err)
 	}
 	if len(filtered) != 1 || filtered[0].Name != "inside" {
-		t.Fatalf("filterSearchItemsByUpdatedAt() = %+v", filtered)
+		t.Fatalf("filterSearchItems(updated) = %+v", filtered)
+	}
+}
+
+func TestFilterSearchItemsCreated(t *testing.T) {
+	items := []models.RepoItem{
+		{Name: "old", CreatedAt: time.Date(2026, 3, 5, 4, 19, 40, 0, time.UTC)},
+		{Name: "inside", CreatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC)},
+		{Name: "late", CreatedAt: time.Date(2026, 3, 14, 0, 0, 1, 0, time.UTC)},
+	}
+
+	filtered, err := filterSearchItems(items, "created", "2026-03-10", "2026-03-13", "", "")
+	if err != nil {
+		t.Fatalf("filterSearchItems(created) error = %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Name != "inside" {
+		t.Fatalf("filterSearchItems(created) = %+v", filtered)
+	}
+}
+
+func TestFilterSearchItemsEither(t *testing.T) {
+	items := []models.RepoItem{
+		{Name: "created-only", CreatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC)},
+		{Name: "updated-only", CreatedAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC)},
+		{Name: "outside", CreatedAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC), UpdatedAt: time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)},
+	}
+
+	filtered, err := filterSearchItems(items, "either", "2026-03-10", "2026-03-13", "2026-03-10", "2026-03-13")
+	if err != nil {
+		t.Fatalf("filterSearchItems(either) error = %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("filterSearchItems(either) len = %d, want 2", len(filtered))
 	}
 }
 

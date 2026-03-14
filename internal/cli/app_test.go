@@ -99,37 +99,72 @@ func TestShouldEmitSearchResult(t *testing.T) {
 }
 
 func TestBuildSearchQuery(t *testing.T) {
-	query, err := buildSearchQuery("stars:>5", "2026-03-01", "2026-03-13")
+	plan, err := buildSearchQueryPlan("stars:>5", searchTimeFilters{
+		Activity:      "updated",
+		UpdatedSince:  "2026-03-01",
+		UpdatedBefore: "2026-03-13",
+	})
 	if err != nil {
-		t.Fatalf("buildSearchQuery() error = %v", err)
+		t.Fatalf("buildSearchQueryPlan() error = %v", err)
 	}
 	want := "stars:>5 updated:2026-03-01..2026-03-13"
-	if query != want {
-		t.Fatalf("buildSearchQuery() = %q, want %q", query, want)
+	if got := plan.PrimaryQuery(); got != want {
+		t.Fatalf("PrimaryQuery() = %q, want %q", got, want)
 	}
 }
 
 func TestBuildSearchQuerySingleBound(t *testing.T) {
-	query, err := buildSearchQuery("stars:>5", "2026-03-01", "")
+	plan, err := buildSearchQueryPlan("stars:>5", searchTimeFilters{
+		Activity:     "updated",
+		UpdatedSince: "2026-03-01",
+	})
 	if err != nil {
-		t.Fatalf("buildSearchQuery(since only) error = %v", err)
+		t.Fatalf("buildSearchQueryPlan(since only) error = %v", err)
 	}
-	if query != "stars:>5 updated:>=2026-03-01" {
-		t.Fatalf("buildSearchQuery(since only) = %q", query)
+	if got := plan.PrimaryQuery(); got != "stars:>5 updated:>=2026-03-01" {
+		t.Fatalf("PrimaryQuery(since only) = %q", got)
 	}
 
-	query, err = buildSearchQuery("stars:>5", "", "2026-03-13")
+	plan, err = buildSearchQueryPlan("stars:>5", searchTimeFilters{
+		Activity:      "updated",
+		UpdatedBefore: "2026-03-13",
+	})
 	if err != nil {
-		t.Fatalf("buildSearchQuery(updated-before only) error = %v", err)
+		t.Fatalf("buildSearchQueryPlan(updated-before only) error = %v", err)
 	}
-	if query != "stars:>5 updated:<=2026-03-13" {
-		t.Fatalf("buildSearchQuery(updated-before only) = %q", query)
+	if got := plan.PrimaryQuery(); got != "stars:>5 updated:<=2026-03-13" {
+		t.Fatalf("PrimaryQuery(updated-before only) = %q", got)
 	}
 }
 
 func TestBuildSearchQueryRejectsDuplicateUpdatedQualifier(t *testing.T) {
-	if _, err := buildSearchQuery("stars:>5 updated:>=2026-03-01", "2026-03-02", ""); err == nil {
-		t.Fatal("buildSearchQuery() expected error when query already contains updated:")
+	if _, err := buildSearchQueryPlan("stars:>5 updated:>=2026-03-01", searchTimeFilters{
+		Activity:     "updated",
+		UpdatedSince: "2026-03-02",
+	}); err == nil {
+		t.Fatal("buildSearchQueryPlan() expected error when query already contains updated:")
+	}
+}
+
+func TestBuildSearchQueryPlanEither(t *testing.T) {
+	plan, err := buildSearchQueryPlan("stars:>=0", searchTimeFilters{
+		Activity:      "either",
+		CreatedSince:  "2026-03-01",
+		CreatedBefore: "2026-03-13",
+		UpdatedSince:  "2026-03-01",
+		UpdatedBefore: "2026-03-13",
+	})
+	if err != nil {
+		t.Fatalf("buildSearchQueryPlan(either) error = %v", err)
+	}
+	if len(plan.Queries) != 2 {
+		t.Fatalf("Queries len = %d, want 2", len(plan.Queries))
+	}
+	if plan.Queries[0] != "stars:>=0 updated:2026-03-01..2026-03-13" {
+		t.Fatalf("updated query = %q", plan.Queries[0])
+	}
+	if plan.Queries[1] != "stars:>=0 created:2026-03-01..2026-03-13" {
+		t.Fatalf("created query = %q", plan.Queries[1])
 	}
 }
 
@@ -146,17 +181,21 @@ func TestNormalizeSearchDate(t *testing.T) {
 }
 
 func TestResolveSearchProfile(t *testing.T) {
-	profile, err := resolveSearchProfile("recent")
+	now := time.Date(2026, 3, 13, 12, 0, 0, 0, time.UTC)
+	profile, err := resolveSearchProfileAt("recent", now)
 	if err != nil {
 		t.Fatalf("resolveSearchProfile(recent) error = %v", err)
 	}
 	if profile.Name != "recent" {
 		t.Fatalf("resolveSearchProfile(recent).Name = %q", profile.Name)
 	}
-	if profile.Query == "" || profile.Since == "" {
-		t.Fatalf("resolveSearchProfile(recent) = %+v, want populated query/since", profile)
+	if profile.Query == "" || profile.UpdatedSince == "" {
+		t.Fatalf("resolveSearchProfile(recent) = %+v, want populated query/updated_since", profile)
 	}
-	if _, err := resolveSearchProfile("missing"); err == nil {
+	if profile.Activity != "updated" {
+		t.Fatalf("resolveSearchProfile(recent).Activity = %q", profile.Activity)
+	}
+	if _, err := resolveSearchProfileAt("missing", now); err == nil {
 		t.Fatal("resolveSearchProfile(missing) expected error")
 	}
 }
@@ -176,6 +215,57 @@ func TestWriteSearchProfiles(t *testing.T) {
 		if !strings.Contains(output, needle) {
 			t.Fatalf("writeSearchProfiles() missing %q in output: %s", needle, output)
 		}
+	}
+}
+
+func TestBuildCapabilityCatalogIncludesCommands(t *testing.T) {
+	caps := buildCapabilityCatalog(time.Date(2026, 3, 13, 12, 0, 0, 0, time.UTC))
+	names := make([]string, 0, len(caps.Commands))
+	for _, command := range caps.Commands {
+		names = append(names, command.Name)
+	}
+	for _, name := range []string{"search", "repo", "user", "verdict", "checkpoints", "capabilities", "recommend"} {
+		if !strings.Contains(strings.Join(names, ","), name) {
+			t.Fatalf("buildCapabilityCatalog() missing %q in %v", name, names)
+		}
+	}
+	if caps.SearchTime.DefaultActivity != "updated" {
+		t.Fatalf("DefaultActivity = %q", caps.SearchTime.DefaultActivity)
+	}
+}
+
+func TestRecommendTaskRepo(t *testing.T) {
+	now := time.Date(2026, 3, 13, 18, 0, 0, 0, time.FixedZone("CDT", -5*60*60))
+	rec := recommendTask("scan repo BearHuddleston/GitHubWatchdog", now)
+	if rec.Command != "repo" {
+		t.Fatalf("Command = %q, want repo", rec.Command)
+	}
+	if len(rec.Invocations) != 1 || rec.Invocations[0].Argv[2] != "repo" {
+		t.Fatalf("Invocations = %+v", rec.Invocations)
+	}
+}
+
+func TestRecommendTaskSearchEither(t *testing.T) {
+	now := time.Date(2026, 3, 13, 18, 0, 0, 0, time.FixedZone("CDT", -5*60*60))
+	rec := recommendTask("find new or updated repos from the last 3 days", now)
+	if rec.Command != "search" {
+		t.Fatalf("Command = %q, want search", rec.Command)
+	}
+	if rec.ParsedIntent.Activity != "either" {
+		t.Fatalf("Activity = %q, want either", rec.ParsedIntent.Activity)
+	}
+	args := strings.Join(rec.Invocations[0].Argv, " ")
+	for _, needle := range []string{"--activity either", "--created-since 2026-03-10", "--since 2026-03-10"} {
+		if !strings.Contains(args, needle) {
+			t.Fatalf("recommend args missing %q in %q", needle, args)
+		}
+	}
+}
+
+func TestRecommendTaskCheckpoint(t *testing.T) {
+	rec := recommendTask("export checkpoints", time.Now())
+	if rec.Command != "checkpoints" || rec.Subcommand != "export" {
+		t.Fatalf("recommend checkpoint = %+v", rec)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 type RepoItem struct {
 	Name            string    `json:"name"`
 	FullName        string    `json:"full_name"`
+	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 	Size            int       `json:"size"`
 	StargazersCount int       `json:"stargazers_count"`

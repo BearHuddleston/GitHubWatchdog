@@ -5,11 +5,13 @@
 Use `search` for broad repository discovery.
 
 Auth can come from `GITHUB_TOKEN`, `GH_TOKEN`, or a logged-in `gh` session.
-For agent flows, derive `--since` and `--updated-before` from the user's prompt instead of inventing unrelated fixed dates.
+For agent flows, derive `--since`, `--created-since`, and related upper bounds from the user's prompt instead of inventing unrelated fixed dates.
 
 ```bash
 go run ./cmd/app search --profile recent --only-flagged --format ndjson
 go run ./cmd/app search --query 'stars:>20' --since 2026-03-01 --updated-before 2026-03-13
+go run ./cmd/app search --activity created --created-since 2026-03-01 --created-before 2026-03-13
+go run ./cmd/app search --activity either --created-since 2026-03-10 --since 2026-03-10
 go run ./cmd/app search --profile backfill --checkpoint backlog
 go run ./cmd/app search --checkpoint backlog --resume
 ```
@@ -23,8 +25,11 @@ Useful flags:
 - `--profile recent|high-signal|backfill`
 - `--checkpoint <name>`
 - `--resume`
+- `--activity updated|created|either`
 - `--since`
 - `--updated-before`
+- `--created-since`
+- `--created-before`
 - `--persist=false`
 
 Output notes:
@@ -78,6 +83,20 @@ go run ./cmd/app checkpoints import --input backlog.json
 go run ./cmd/app checkpoints delete backlog
 ```
 
+## Discovery and Planning
+
+Use `capabilities` when another agent needs the current binary contract:
+
+```bash
+go run ./cmd/app capabilities --format json
+```
+
+Use `recommend` when another agent needs a deterministic suggested invocation from a user task:
+
+```bash
+go run ./cmd/app recommend --prompt 'find new or updated repos from the last 3 days' --format json
+```
+
 ## High-Signal Fields
 
 When summarizing machine-readable output, preserve these fields when present:
@@ -94,5 +113,11 @@ When summarizing machine-readable output, preserve these fields when present:
 - `errors`
 - `profile_name`
 - `query`
+- `queries`
+- `activity`
+- `created_since`
+- `created_before`
+- `updated_since`
 - `checkpoint_name`
+- `next_created_before`
 - `next_updated_before`

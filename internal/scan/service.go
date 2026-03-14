@@ -23,9 +23,13 @@ type Service struct {
 type SearchOptions struct {
 	CheckpointName string
 	ProfileName    string
+	Activity       string
 	BaseQuery      string
 	Query          string
-	Since          string
+	Queries        []string
+	CreatedSince   string
+	CreatedBefore  string
+	UpdatedSince   string
 	UpdatedBefore  string
 	MaxPages       int
 	PerPage        int
@@ -50,12 +54,19 @@ type UserOptions struct {
 type SearchReport struct {
 	CheckpointName    string       `json:"checkpoint_name,omitempty"`
 	ProfileName       string       `json:"profile_name,omitempty"`
+	Activity          string       `json:"activity,omitempty"`
 	BaseQuery         string       `json:"base_query,omitempty"`
 	Query             string       `json:"query"`
+	Queries           []string     `json:"queries,omitempty"`
 	Since             string       `json:"since,omitempty"`
+	CreatedSince      string       `json:"created_since,omitempty"`
+	CreatedBefore     string       `json:"created_before,omitempty"`
+	UpdatedSince      string       `json:"updated_since,omitempty"`
 	UpdatedBefore     string       `json:"updated_before,omitempty"`
+	NextCreatedBefore string       `json:"next_created_before,omitempty"`
 	NextUpdatedBefore string       `json:"next_updated_before,omitempty"`
 	StartedAt         time.Time    `json:"started_at"`
+	OldestCreatedAt   time.Time    `json:"oldest_created_at,omitempty"`
 	CompletedAt       time.Time    `json:"completed_at"`
 	OldestUpdatedAt   time.Time    `json:"oldest_updated_at,omitempty"`
 	Results           []RepoReport `json:"results"`
@@ -67,6 +78,7 @@ type RepoReport struct {
 	Owner         string                   `json:"owner"`
 	Name          string                   `json:"name"`
 	DefaultBranch string                   `json:"default_branch,omitempty"`
+	CreatedAt     time.Time                `json:"created_at"`
 	UpdatedAt     time.Time                `json:"updated_at"`
 	DiskUsage     int                      `json:"disk_usage"`
 	Stargazers    int                      `json:"stargazers"`
@@ -111,46 +123,60 @@ func (s *Service) Search(ctx context.Context, opts SearchOptions) (SearchReport,
 
 // SearchStream scans repositories and invokes onResult for each completed repository report.
 func (s *Service) SearchStream(ctx context.Context, opts SearchOptions, onResult func(RepoReport) error) (SearchReport, error) {
+	opts = normalizeSearchOptions(opts)
 	report := SearchReport{
 		CheckpointName: opts.CheckpointName,
 		ProfileName:    opts.ProfileName,
+		Activity:       opts.Activity,
 		BaseQuery:      opts.BaseQuery,
 		Query:          opts.Query,
-		Since:          opts.Since,
+		Queries:        append([]string(nil), opts.Queries...),
+		Since:          opts.UpdatedSince,
+		CreatedSince:   opts.CreatedSince,
+		CreatedBefore:  opts.CreatedBefore,
+		UpdatedSince:   opts.UpdatedSince,
 		UpdatedBefore:  opts.UpdatedBefore,
 		StartedAt:      time.Now().UTC(),
 	}
 
-	opts = normalizeSearchOptions(opts)
+	queries := opts.Queries
+	if len(queries) == 0 && opts.Query != "" {
+		queries = []string{opts.Query}
+	}
 
-	for page := 1; page <= opts.MaxPages; page++ {
-		result, err := s.client.SearchRepositories(ctx, opts.Query, page, opts.PerPage)
-		if err != nil {
-			return report, err
-		}
-		rawCount := len(result.Items)
-		if rawCount == 0 {
-			break
-		}
-		filteredItems, err := filterSearchItemsByUpdatedAt(result.Items, opts.Since, opts.UpdatedBefore)
-		if err != nil {
-			return report, err
-		}
-		if len(filteredItems) == 0 {
+	seenRepoIDs := make(map[string]struct{})
+	for _, query := range queries {
+		for page := 1; page <= opts.MaxPages; page++ {
+			result, err := s.client.SearchRepositories(ctx, query, page, opts.PerPage)
+			if err != nil {
+				return report, err
+			}
+			rawCount := len(result.Items)
+			if rawCount == 0 {
+				break
+			}
+
+			filteredItems, err := filterSearchItems(result.Items, opts.Activity, opts.CreatedSince, opts.CreatedBefore, opts.UpdatedSince, opts.UpdatedBefore)
+			if err != nil {
+				return report, err
+			}
+			filteredItems = dedupeSearchItems(filteredItems, seenRepoIDs)
+			if len(filteredItems) == 0 {
+				if rawCount < opts.PerPage {
+					break
+				}
+				continue
+			}
+
+			pageResults, err := s.processSearchPage(ctx, filteredItems, opts, onResult, &report)
+			report.Results = append(report.Results, pageResults...)
+			if err != nil {
+				return report, err
+			}
+
 			if rawCount < opts.PerPage {
 				break
 			}
-			continue
-		}
-
-		pageResults, err := s.processSearchPage(ctx, filteredItems, opts, onResult, &report)
-		report.Results = append(report.Results, pageResults...)
-		if err != nil {
-			return report, err
-		}
-
-		if rawCount < opts.PerPage {
-			break
 		}
 	}
 
@@ -159,6 +185,9 @@ func (s *Service) SearchStream(ctx context.Context, opts SearchOptions, onResult
 }
 
 func normalizeSearchOptions(opts SearchOptions) SearchOptions {
+	if opts.Activity == "" {
+		opts.Activity = "updated"
+	}
 	if opts.MaxPages <= 0 {
 		opts.MaxPages = 1
 	}
@@ -171,27 +200,75 @@ func normalizeSearchOptions(opts SearchOptions) SearchOptions {
 	return opts
 }
 
-func filterSearchItemsByUpdatedAt(items []models.RepoItem, since, updatedBefore string) ([]models.RepoItem, error) {
-	start, err := parseSearchBoundary(since, false)
+func filterSearchItems(items []models.RepoItem, activity, createdSince, createdBefore, updatedSince, updatedBefore string) ([]models.RepoItem, error) {
+	createdStart, err := parseSearchBoundary(createdSince, false)
 	if err != nil {
 		return nil, err
 	}
-	end, err := parseSearchBoundary(updatedBefore, true)
+	createdEnd, err := parseSearchBoundary(createdBefore, true)
+	if err != nil {
+		return nil, err
+	}
+	updatedStart, err := parseSearchBoundary(updatedSince, false)
+	if err != nil {
+		return nil, err
+	}
+	updatedEnd, err := parseSearchBoundary(updatedBefore, true)
 	if err != nil {
 		return nil, err
 	}
 
 	filtered := make([]models.RepoItem, 0, len(items))
 	for _, item := range items {
-		if !start.IsZero() && item.UpdatedAt.Before(start) {
-			continue
+		switch activity {
+		case "created":
+			if matchesBoundary(item.CreatedAt, createdStart, createdEnd) {
+				filtered = append(filtered, item)
+			}
+		case "either":
+			if matchesBoundary(item.CreatedAt, createdStart, createdEnd) || matchesBoundary(item.UpdatedAt, updatedStart, updatedEnd) {
+				filtered = append(filtered, item)
+			}
+		default:
+			if matchesBoundary(item.UpdatedAt, updatedStart, updatedEnd) {
+				filtered = append(filtered, item)
+			}
 		}
-		if !end.IsZero() && item.UpdatedAt.After(end) {
-			continue
-		}
-		filtered = append(filtered, item)
 	}
 	return filtered, nil
+}
+
+func dedupeSearchItems(items []models.RepoItem, seen map[string]struct{}) []models.RepoItem {
+	filtered := items[:0]
+	for _, item := range items {
+		repoID := repoItemID(item)
+		if _, ok := seen[repoID]; ok {
+			continue
+		}
+		seen[repoID] = struct{}{}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+func repoItemID(item models.RepoItem) string {
+	if item.FullName != "" {
+		return item.FullName
+	}
+	if item.Owner.Login != "" && item.Name != "" {
+		return fmt.Sprintf("%s/%s", item.Owner.Login, item.Name)
+	}
+	return item.Name
+}
+
+func matchesBoundary(value, start, end time.Time) bool {
+	if !start.IsZero() && value.Before(start) {
+		return false
+	}
+	if !end.IsZero() && value.After(end) {
+		return false
+	}
+	return true
 }
 
 func parseSearchBoundary(value string, upper bool) (time.Time, error) {
@@ -253,6 +330,9 @@ func (s *Service) processSearchPage(
 	var callbackErr error
 	for result := range resultsCh {
 		pageResults = append(pageResults, result.report)
+		if report.OldestCreatedAt.IsZero() || result.report.CreatedAt.Before(report.OldestCreatedAt) {
+			report.OldestCreatedAt = result.report.CreatedAt
+		}
 		if report.OldestUpdatedAt.IsZero() || result.report.UpdatedAt.Before(report.OldestUpdatedAt) {
 			report.OldestUpdatedAt = result.report.UpdatedAt
 		}
@@ -366,6 +446,7 @@ func (s *Service) scanRepoItem(ctx context.Context, item models.RepoItem, opts R
 		Owner:         item.Owner.Login,
 		Name:          item.Name,
 		DefaultBranch: item.DefaultBranch,
+		CreatedAt:     item.CreatedAt,
 		UpdatedAt:     item.UpdatedAt,
 		DiskUsage:     item.Size,
 		Stargazers:    item.StargazersCount,
@@ -418,43 +499,43 @@ func (s *Service) scanRepoItem(ctx context.Context, item models.RepoItem, opts R
 	if !opts.AnalyzeOwner {
 		return repo
 	}
-	if opts.OwnerIfSmallOnly && repo.DiskUsage >= 10 {
+
+	if opts.OwnerIfSmallOnly && repo.FileCount > 20 {
 		return repo
 	}
 
 	userReport, err := s.ScanUser(ctx, repo.Owner, UserOptions{Persist: opts.Persist})
-	repo.OwnerAnalysis = &userReport
 	if err != nil {
-		repo.Errors = append(repo.Errors, fmt.Sprintf("analyzing owner: %v", err))
+		repo.Errors = append(repo.Errors, err.Error())
+		return repo
 	}
-
+	repo.OwnerAnalysis = &userReport
 	return repo
 }
 
-func (s *Service) persistRepo(repo RepoReport) error {
+func (s *Service) persistRepo(report RepoReport) error {
 	if s.db == nil {
 		return nil
 	}
-
-	for _, flag := range repo.RepoFlags {
-		flagMsg := fmt.Sprintf("[%s] %s: %s", flag.Category, flag.Name, flag.Description)
-		if err := s.db.InsertHeuristicFlag("repo", repo.RepoID, flagMsg); err != nil {
-			return fmt.Errorf("recording repo flag: %w", err)
+	if err := s.db.InsertProcessedRepo(report.RepoID, report.Owner, report.Name, report.UpdatedAt, report.DiskUsage, report.Stargazers, report.IsMalicious); err != nil {
+		return err
+	}
+	for _, flag := range report.RepoFlags {
+		if flag.Flag {
+			if err := s.db.InsertHeuristicFlag("repo", report.RepoID, fmt.Sprintf("%s:%s", flag.Category, flag.Name)); err != nil {
+				return err
+			}
 		}
 	}
-
-	if err := s.db.InsertProcessedRepo(
-		repo.RepoID,
-		repo.Owner,
-		repo.Name,
-		repo.UpdatedAt,
-		repo.DiskUsage,
-		repo.Stargazers,
-		repo.IsMalicious,
-	); err != nil {
-		return fmt.Errorf("recording repository: %w", err)
+	if report.OwnerAnalysis != nil {
+		for _, heuristic := range report.OwnerAnalysis.Heuristics {
+			if heuristic.Flag {
+				if err := s.db.InsertHeuristicFlag("user", report.OwnerAnalysis.Username, fmt.Sprintf("%s:%s", heuristic.Category, heuristic.Name)); err != nil {
+					return err
+				}
+			}
+		}
 	}
-
 	return nil
 }
 
@@ -462,31 +543,15 @@ func (s *Service) persistUser(report UserReport) error {
 	if s.db == nil {
 		return nil
 	}
-
-	if !s.analyzer.IsUserFlagged(report.Username) {
-		for _, hr := range report.Heuristics {
-			if !hr.Flag {
-				continue
-			}
-			flagMsg := fmt.Sprintf("[%s] %s: %s", hr.Category, hr.Name, hr.Description)
-			if err := s.db.InsertHeuristicFlag("user", report.Username, flagMsg); err != nil {
-				return fmt.Errorf("recording user flag: %w", err)
+	if err := s.db.InsertProcessedUser(report.Username, report.CreatedAt, report.TotalStars, report.EmptyCount, report.SuspiciousEmptyCount, report.Contributions, report.Suspicious); err != nil {
+		return err
+	}
+	for _, heuristic := range report.Heuristics {
+		if heuristic.Flag {
+			if err := s.db.InsertHeuristicFlag("user", report.Username, fmt.Sprintf("%s:%s", heuristic.Category, heuristic.Name)); err != nil {
+				return err
 			}
 		}
-		s.analyzer.MarkUserFlagged(report.Username)
 	}
-
-	if err := s.db.InsertProcessedUser(
-		report.Username,
-		report.CreatedAt,
-		report.TotalStars,
-		report.EmptyCount,
-		report.SuspiciousEmptyCount,
-		report.Contributions,
-		report.Suspicious,
-	); err != nil {
-		return fmt.Errorf("recording user: %w", err)
-	}
-
 	return nil
 }
