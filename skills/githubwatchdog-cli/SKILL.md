@@ -62,6 +62,12 @@ Use checkpoint workflows for resumable scans:
 - Export or import state with `checkpoints export` and `checkpoints import`.
 - Inspect with `checkpoints show <name>` before resuming when the scan window matters.
 
+Translate time windows from the prompt into CLI flags:
+
+- If the prompt says "last few days", "last 72 hours", "since yesterday", or similar, choose `--since` and optionally `--updated-before` based on that request instead of hard-coding dates unrelated to the prompt.
+- If the prompt implies "up to now", prefer only `--since` rather than adding an unnecessary upper bound.
+- If the prompt gives explicit dates, preserve them exactly in the CLI flags and in any summary you return.
+
 Do not manually rebuild `updated:` query fragments when `--since` or `--updated-before` can express the same intent. The CLI already validates and applies those qualifiers.
 
 ## Summarize Results Correctly

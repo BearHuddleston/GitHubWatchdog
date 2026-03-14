@@ -2,6 +2,7 @@ package scan
 
 import (
 	"testing"
+	"time"
 
 	"github.com/arkouda/github/GitHubWatchdog/internal/models"
 )
@@ -129,5 +130,47 @@ func TestSearchReportFilterPreservesMetadata(t *testing.T) {
 	}
 	if filtered.CheckpointName != "backlog" || filtered.NextUpdatedBefore != "2026-03-12T23:59:59Z" {
 		t.Fatalf("checkpoint metadata not preserved: %+v", filtered)
+	}
+}
+
+func TestFilterSearchItemsByUpdatedAt(t *testing.T) {
+	items := []models.RepoItem{
+		{Name: "old", UpdatedAt: time.Date(2026, 3, 5, 4, 19, 40, 0, time.UTC)},
+		{Name: "inside", UpdatedAt: time.Date(2026, 3, 12, 12, 0, 0, 0, time.UTC)},
+		{Name: "late", UpdatedAt: time.Date(2026, 3, 14, 0, 0, 1, 0, time.UTC)},
+	}
+
+	filtered, err := filterSearchItemsByUpdatedAt(items, "2026-03-10", "2026-03-13")
+	if err != nil {
+		t.Fatalf("filterSearchItemsByUpdatedAt() error = %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Name != "inside" {
+		t.Fatalf("filterSearchItemsByUpdatedAt() = %+v", filtered)
+	}
+}
+
+func TestParseSearchBoundary(t *testing.T) {
+	lower, err := parseSearchBoundary("2026-03-10", false)
+	if err != nil {
+		t.Fatalf("parseSearchBoundary(date lower) error = %v", err)
+	}
+	if !lower.Equal(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("parseSearchBoundary(date lower) = %s", lower)
+	}
+
+	upper, err := parseSearchBoundary("2026-03-13", true)
+	if err != nil {
+		t.Fatalf("parseSearchBoundary(date upper) error = %v", err)
+	}
+	if !upper.Equal(time.Date(2026, 3, 13, 23, 59, 59, int(time.Second-time.Nanosecond), time.UTC)) {
+		t.Fatalf("parseSearchBoundary(date upper) = %s", upper)
+	}
+
+	exact, err := parseSearchBoundary("2026-03-13T12:34:56Z", true)
+	if err != nil {
+		t.Fatalf("parseSearchBoundary(rfc3339) error = %v", err)
+	}
+	if !exact.Equal(time.Date(2026, 3, 13, 12, 34, 56, 0, time.UTC)) {
+		t.Fatalf("parseSearchBoundary(rfc3339) = %s", exact)
 	}
 }

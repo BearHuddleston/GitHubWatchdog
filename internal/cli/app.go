@@ -623,6 +623,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Notes:")
 	fmt.Fprintln(w, "  - Scan commands default to JSON output for agent-friendly consumption.")
+	fmt.Fprintln(w, "  - Use -quiet for automation that wants clean stderr.")
 	fmt.Fprintln(w, "  - search --format ndjson streams result lines plus a final summary line.")
 	fmt.Fprintln(w, "  - search --since and --updated-before add validated updated: qualifiers to the GitHub query.")
 	fmt.Fprintln(w, "  - search --profile applies a built-in preset; explicit flags override the preset.")
@@ -849,19 +850,30 @@ func buildSearchQuery(baseQuery, since, updatedBefore string) (string, error) {
 		return "", errors.New("cannot combine --since/--updated-before with a query that already includes updated:")
 	}
 
+	var normalizedSince string
 	if since != "" {
 		normalized, err := normalizeSearchDate(since)
 		if err != nil {
 			return "", fmt.Errorf("invalid --since value: %w", err)
 		}
-		query = strings.TrimSpace(query + " updated:>=" + normalized)
+		normalizedSince = normalized
 	}
+	var normalizedUpdatedBefore string
 	if updatedBefore != "" {
 		normalized, err := normalizeSearchDate(updatedBefore)
 		if err != nil {
 			return "", fmt.Errorf("invalid --updated-before value: %w", err)
 		}
-		query = strings.TrimSpace(query + " updated:<=" + normalized)
+		normalizedUpdatedBefore = normalized
+	}
+
+	switch {
+	case normalizedSince != "" && normalizedUpdatedBefore != "":
+		query = strings.TrimSpace(query + " updated:" + normalizedSince + ".." + normalizedUpdatedBefore)
+	case normalizedSince != "":
+		query = strings.TrimSpace(query + " updated:>=" + normalizedSince)
+	case normalizedUpdatedBefore != "":
+		query = strings.TrimSpace(query + " updated:<=" + normalizedUpdatedBefore)
 	}
 
 	return query, nil

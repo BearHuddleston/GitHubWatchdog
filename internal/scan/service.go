@@ -128,17 +128,28 @@ func (s *Service) SearchStream(ctx context.Context, opts SearchOptions, onResult
 		if err != nil {
 			return report, err
 		}
-		if len(result.Items) == 0 {
+		rawCount := len(result.Items)
+		if rawCount == 0 {
 			break
 		}
+		filteredItems, err := filterSearchItemsByUpdatedAt(result.Items, opts.Since, opts.UpdatedBefore)
+		if err != nil {
+			return report, err
+		}
+		if len(filteredItems) == 0 {
+			if rawCount < opts.PerPage {
+				break
+			}
+			continue
+		}
 
-		pageResults, err := s.processSearchPage(ctx, result.Items, opts, onResult, &report)
+		pageResults, err := s.processSearchPage(ctx, filteredItems, opts, onResult, &report)
 		report.Results = append(report.Results, pageResults...)
 		if err != nil {
 			return report, err
 		}
 
-		if len(result.Items) < opts.PerPage {
+		if rawCount < opts.PerPage {
 			break
 		}
 	}
@@ -158,6 +169,45 @@ func normalizeSearchOptions(opts SearchOptions) SearchOptions {
 		opts.MaxConcurrent = 10
 	}
 	return opts
+}
+
+func filterSearchItemsByUpdatedAt(items []models.RepoItem, since, updatedBefore string) ([]models.RepoItem, error) {
+	start, err := parseSearchBoundary(since, false)
+	if err != nil {
+		return nil, err
+	}
+	end, err := parseSearchBoundary(updatedBefore, true)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := make([]models.RepoItem, 0, len(items))
+	for _, item := range items {
+		if !start.IsZero() && item.UpdatedAt.Before(start) {
+			continue
+		}
+		if !end.IsZero() && item.UpdatedAt.After(end) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
+}
+
+func parseSearchBoundary(value string, upper bool) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	if parsed, err := time.Parse(time.DateOnly, value); err == nil {
+		if upper {
+			return parsed.Add(24*time.Hour - time.Nanosecond), nil
+		}
+		return parsed, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("invalid search boundary %q: expected YYYY-MM-DD or RFC3339", value)
 }
 
 func (s *Service) processSearchPage(

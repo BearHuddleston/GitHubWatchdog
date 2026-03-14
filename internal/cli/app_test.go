@@ -103,9 +103,27 @@ func TestBuildSearchQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildSearchQuery() error = %v", err)
 	}
-	want := "stars:>5 updated:>=2026-03-01 updated:<=2026-03-13"
+	want := "stars:>5 updated:2026-03-01..2026-03-13"
 	if query != want {
 		t.Fatalf("buildSearchQuery() = %q, want %q", query, want)
+	}
+}
+
+func TestBuildSearchQuerySingleBound(t *testing.T) {
+	query, err := buildSearchQuery("stars:>5", "2026-03-01", "")
+	if err != nil {
+		t.Fatalf("buildSearchQuery(since only) error = %v", err)
+	}
+	if query != "stars:>5 updated:>=2026-03-01" {
+		t.Fatalf("buildSearchQuery(since only) = %q", query)
+	}
+
+	query, err = buildSearchQuery("stars:>5", "", "2026-03-13")
+	if err != nil {
+		t.Fatalf("buildSearchQuery(updated-before only) error = %v", err)
+	}
+	if query != "stars:>5 updated:<=2026-03-13" {
+		t.Fatalf("buildSearchQuery(updated-before only) = %q", query)
 	}
 }
 

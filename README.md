@@ -1,6 +1,6 @@
 # GitHubWatchdog
 
-GitHubWatchdog is a Go CLI for scanning GitHub repositories and users for suspicious or malicious patterns. It can run broad searches, targeted repo or user scans, and mixed-target verdict batches backed by SQLite.
+GitHubWatchdog is an agent-first Go CLI for scanning GitHub repositories and users for suspicious or malicious patterns. It can run broad searches, targeted repo or user scans, and mixed-target verdict batches backed by SQLite.
 
 The CLI is designed to be agent-friendly:
 
@@ -8,6 +8,7 @@ The CLI is designed to be agent-friendly:
 - `ndjson` is available for streaming workflows.
 - Exit code `10` signals findings when `--fail-on-findings` is used.
 - Search checkpoints can be saved, resumed, exported, and imported.
+- `-quiet` suppresses informational stderr logs for cleaner automation.
 
 ## Requirements
 
@@ -105,6 +106,8 @@ Add validated time filters without editing raw `updated:` qualifiers:
 ```bash
 ./githubwatchdog search --since 2026-03-01 --updated-before 2026-03-13
 ```
+
+For agent workflows, derive the time window from the prompt. If the prompt implies "up to now", prefer just `--since` and omit `--updated-before`.
 
 Use a built-in profile:
 

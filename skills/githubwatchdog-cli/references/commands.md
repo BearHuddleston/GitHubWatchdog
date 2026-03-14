@@ -5,6 +5,7 @@
 Use `search` for broad repository discovery.
 
 Auth can come from `GITHUB_TOKEN`, `GH_TOKEN`, or a logged-in `gh` session.
+For agent flows, derive `--since` and `--updated-before` from the user's prompt instead of inventing unrelated fixed dates.
 
 ```bash
 go run ./cmd/app search --profile recent --only-flagged --format ndjson
